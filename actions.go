@@ -47,6 +47,16 @@ func messageLink(chatID int64, msgID int, chatUsername string) string {
 	return fmt.Sprintf("https://t.me/c/%s/%d", id, msgID)
 }
 
+// chatMessageLink builds a link to a message in an arbitrary chat
+// (used for the source post of an external forward); "" when the
+// message id is unknown.
+func chatMessageLink(chatID int64, username string, msgID int) string {
+	if msgID <= 0 {
+		return ""
+	}
+	return messageLink(chatID, msgID, username)
+}
+
 // reactionFor resolves the configured reaction for type×category.
 func (d *Detector) reactionFor(typ DupType, cat DupCategory) Reaction {
 	var rs ReactionSettings
@@ -66,7 +76,14 @@ func (d *Detector) reactionFor(typ DupType, cat DupCategory) Reaction {
 func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original StoredMessage, now time.Time) {
 	reaction := d.reactionFor(typ, cat)
 	link := messageLink(c.ChatID, c.MsgID, d.chatUsername)
-	origLink := messageLink(c.ChatID, original.MsgID, d.chatUsername)
+
+	// Link for the delete notice: the in-chat original when one
+	// exists; for external forwards — the source post; otherwise
+	// no link (the message is replaced by plain text).
+	origLink := c.SourceLink
+	if original.MsgID > 0 {
+		origLink = messageLink(c.ChatID, original.MsgID, d.chatUsername)
+	}
 
 	switch reaction {
 	case ReactionIgnore:
@@ -89,7 +106,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 			log.Printf("[action] удаление дубля: %v", err)
 			return
 		}
-		text := fmt.Sprintf(deletedTemplate(typ), origLink)
+		text := deletedMessageText(typ, origLink)
 		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
 		sent, err := d.bot.Send(tgbotapi.NewMessage(c.ChatID, text))
 		if err != nil {
@@ -101,6 +118,15 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 
 	// Warning accounting happens for comment/delete reactions only.
 	d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now)
+}
+
+// deletedMessageText builds the delete notice; without a link the
+// message degrades to a plain statement.
+func deletedMessageText(typ DupType, link string) string {
+	if link == "" {
+		return "Удалена пересылка из внешнего источника"
+	}
+	return fmt.Sprintf(deletedTemplate(typ), link)
 }
 
 // appendWarningLine appends the current warning count when warnings

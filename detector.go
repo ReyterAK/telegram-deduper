@@ -33,6 +33,9 @@ type MsgContent struct {
 	HasURL          bool
 	MediaUID        string
 	ForwardExternal bool
+	// SourceLink points at the original post for external forwards
+	// ("" when the source is unknown).
+	SourceLink string
 }
 
 // Detector wires store + telegram into the duplicate pipeline.
@@ -64,6 +67,10 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 	norm := NormalizeText(text)
 	mediaUID := mediaUniqueID(m)
 	forwardExternal := forwardOriginExternal(m, chatID)
+	sourceLink := ""
+	if m.ForwardFromChat != nil {
+		sourceLink = chatMessageLink(m.ForwardFromChat.ID, m.ForwardFromChat.UserName, m.ForwardFromMessageID)
+	}
 	return MsgContent{
 		ChatID:          chatID,
 		MsgID:           m.MessageID,
@@ -72,6 +79,7 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 		HasURL:          norm != "" && HasURL(norm),
 		MediaUID:        mediaUID,
 		ForwardExternal: forwardExternal,
+		SourceLink:      sourceLink,
 	}
 }
 

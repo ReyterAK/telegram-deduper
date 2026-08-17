@@ -109,6 +109,58 @@ func TestExtractContent(t *testing.T) {
 	}
 }
 
+func TestExtractContentForwardSourceLink(t *testing.T) {
+	m := &tgbotapi.Message{
+		MessageID:           50,
+		Chat:                &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
+		From:                &tgbotapi.User{ID: 7},
+		ForwardFromChat:     &tgbotapi.Chat{ID: -100999, UserName: "sourcechan"},
+		ForwardFromMessageID: 321,
+		Text:                "пост из канала",
+	}
+	c := extractContent(m, -100123)
+	if !c.ForwardExternal {
+		t.Error("forward must be external")
+	}
+	if c.SourceLink != "https://t.me/sourcechan/321" {
+		t.Fatalf("source link = %q", c.SourceLink)
+	}
+
+	// channel without username → c/ link
+	m2 := &tgbotapi.Message{
+		MessageID:           51,
+		Chat:                &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
+		From:                &tgbotapi.User{ID: 7},
+		ForwardFromChat:     &tgbotapi.Chat{ID: -100999},
+		ForwardFromMessageID: 321,
+	}
+	c2 := extractContent(m2, -100123)
+	if c2.SourceLink != "https://t.me/c/100999/321" {
+		t.Fatalf("source link = %q", c2.SourceLink)
+	}
+
+	// no source message id → no link
+	m3 := &tgbotapi.Message{
+		MessageID:       52,
+		Chat:            &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
+		From:            &tgbotapi.User{ID: 7},
+		ForwardFromChat: &tgbotapi.Chat{ID: -100999},
+	}
+	c3 := extractContent(m3, -100123)
+	if c3.SourceLink != "" {
+		t.Fatalf("expected empty source link, got %q", c3.SourceLink)
+	}
+}
+
+func TestDeletedMessageText(t *testing.T) {
+	if got := deletedMessageText(DupTypeLink, "https://t.me/c/100/5"); got != "Удален дубль ссылки в сообщении https://t.me/c/100/5" {
+		t.Fatalf("with link: %q", got)
+	}
+	if got := deletedMessageText(DupTypeLink, ""); got != "Удалена пересылка из внешнего источника" {
+		t.Fatalf("without link: %q", got)
+	}
+}
+
 func TestMessageLink(t *testing.T) {
 	if got := messageLink(-100123456789, 5, "mychat"); got != "https://t.me/mychat/5" {
 		t.Fatalf("username link = %q", got)
