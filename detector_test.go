@@ -125,6 +125,9 @@ func TestExtractContentForwardSourceLink(t *testing.T) {
 	if c.SourceLink != "https://t.me/sourcechan/321" {
 		t.Fatalf("source link = %q", c.SourceLink)
 	}
+	if c.FwdSource != "fwd:-100999:321" {
+		t.Fatalf("fwd source = %q", c.FwdSource)
+	}
 
 	// channel without username → c/ link
 	m2 := &tgbotapi.Message{

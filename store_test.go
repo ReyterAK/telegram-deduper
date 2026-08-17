@@ -20,7 +20,7 @@ func TestFindDuplicatesByText(t *testing.T) {
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, NormText: "привет мир", TS: now})
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 2, UserID: 20, NormText: "другое сообщение", TS: now})
 
-	dups, err := st.FindDuplicates(chat, now-86400, "привет мир", "", 3)
+	dups, err := st.FindDuplicates(chat, now-86400, "привет мир", "", "", 3)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestFindDuplicatesByMedia(t *testing.T) {
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, MediaUID: "uid-abc", TS: now})
 
 	// same media → duplicate
-	dups, err := st.FindDuplicates(chat, now-86400, "", "uid-abc", 2)
+	dups, err := st.FindDuplicates(chat, now-86400, "", "uid-abc", "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,12 +46,47 @@ func TestFindDuplicatesByMedia(t *testing.T) {
 	}
 
 	// different media → no duplicate
-	dups, err = st.FindDuplicates(chat, now-86400, "", "uid-xyz", 2)
+	dups, err = st.FindDuplicates(chat, now-86400, "", "uid-xyz", "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(dups) != 0 {
 		t.Fatalf("unexpected media duplicate: %+v", dups)
+	}
+}
+
+func TestFindDuplicatesByForwardSource(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, NormText: "пост", FwdSource: "fwd:-100999:321", TS: now})
+
+	// same source re-forward → duplicate (even with a different caption)
+	dups, err := st.FindDuplicates(chat, now-86400, "другой текст", "", "fwd:-100999:321", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 1 {
+		t.Fatalf("expected forward-source duplicate, got %d", len(dups))
+	}
+
+	// different source → no duplicate
+	dups, err = st.FindDuplicates(chat, now-86400, "пост", "", "fwd:-100888:111", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("unexpected source duplicate: %+v", dups)
+	}
+
+	// plain message with no source is not matched by a source query
+	dups, err = st.FindDuplicates(chat, now-86400, "пост", "", "", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("plain text must not match fwd_source: %+v", dups)
 	}
 }
 
@@ -63,7 +98,7 @@ func TestFindDuplicatesOrderOldestFirst(t *testing.T) {
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 5, UserID: 10, NormText: "дубль", TS: now - 200})
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 9, UserID: 20, NormText: "дубль", TS: now - 100})
 
-	dups, err := st.FindDuplicates(chat, now-86400, "дубль", "", 99)
+	dups, err := st.FindDuplicates(chat, now-86400, "дубль", "", "", 99)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +123,11 @@ func TestRetentionCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	dups, _ := st.FindDuplicates(chat, now-10*86400, "старое", "", 99)
+	dups, _ := st.FindDuplicates(chat, now-10*86400, "старое", "", "", 99)
 	if len(dups) != 0 {
 		t.Fatalf("old message survived cleanup: %+v", dups)
 	}
-	dups, _ = st.FindDuplicates(chat, now-10*86400, "свежее", "", 99)
+	dups, _ = st.FindDuplicates(chat, now-10*86400, "свежее", "", "", 99)
 	if len(dups) != 1 {
 		t.Fatalf("fresh message lost: %+v", dups)
 	}

@@ -18,6 +18,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -33,6 +34,9 @@ type MsgContent struct {
 	HasURL          bool
 	MediaUID        string
 	ForwardExternal bool
+	// FwdSource identifies the origin of an external forward
+	// ("fwd:<chat_id>:<msg_id>", "" when unknown/not a forward).
+	FwdSource string
 	// SourceLink points at the original post for external forwards
 	// ("" when the source is unknown).
 	SourceLink string
@@ -67,8 +71,10 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 	norm := NormalizeText(text)
 	mediaUID := mediaUniqueID(m)
 	forwardExternal := forwardOriginExternal(m, chatID)
+	fwdSource := ""
 	sourceLink := ""
 	if m.ForwardFromChat != nil {
+		fwdSource = fmt.Sprintf("fwd:%d:%d", m.ForwardFromChat.ID, m.ForwardFromMessageID)
 		sourceLink = chatMessageLink(m.ForwardFromChat.ID, m.ForwardFromChat.UserName, m.ForwardFromMessageID)
 	}
 	return MsgContent{
@@ -79,6 +85,7 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 		HasURL:          norm != "" && HasURL(norm),
 		MediaUID:        mediaUID,
 		ForwardExternal: forwardExternal,
+		FwdSource:       fwdSource,
 		SourceLink:      sourceLink,
 	}
 }
@@ -162,21 +169,18 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	}
 
 	c := extractContent(m, chatID)
-	if c.NormText == "" && c.MediaUID == "" && !c.ForwardExternal {
+	if c.NormText == "" && c.MediaUID == "" && c.FwdSource == "" {
 		return // service message without comparable content
 	}
 
 	now := time.Now()
 	window := now.Add(-time.Duration(d.cfg.RetentionDays) * 24 * time.Hour).Unix()
 
-	// Forward from outside is a duplicate by definition.
-	if c.ForwardExternal {
-		d.store(c, now.Unix())
-		d.react(c, DupTypeLink, CatDiffParticipant, StoredMessage{}, now)
-		return
-	}
-
-	dups, err := d.st.FindDuplicates(chatID, window, c.NormText, c.MediaUID, c.MsgID)
+	// The first occurrence of any content (including the first
+	// forward from an external source) is NOT a duplicate — only
+	// repeats within the window are. Forwards are stored and matched
+	// like regular messages: by text, by media, or by their source.
+	dups, err := d.st.FindDuplicates(chatID, window, c.NormText, c.MediaUID, c.FwdSource, c.MsgID)
 	if err != nil {
 		log.Printf("[detect] поиск дублей: %v", err)
 	}
@@ -193,7 +197,7 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 			break
 		}
 	}
-	d.react(c, classify(c.HasURL, false), cat, dups[0], now)
+	d.react(c, classify(c.HasURL, c.ForwardExternal), cat, dups[0], now)
 }
 
 func (d *Detector) store(c MsgContent, ts int64) {
@@ -205,6 +209,7 @@ func (d *Detector) store(c MsgContent, ts int64) {
 		HasURL:          c.HasURL,
 		MediaUID:        c.MediaUID,
 		ForwardExternal: c.ForwardExternal,
+		FwdSource:       c.FwdSource,
 		TS:              ts,
 	}); err != nil {
 		log.Printf("[detect] запись сообщения: %v", err)

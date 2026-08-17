@@ -26,6 +26,7 @@ type StoredMessage struct {
 	HasURL          bool
 	MediaUID        string
 	ForwardExternal bool
+	FwdSource       string
 	TS              int64
 }
 
@@ -48,6 +49,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	has_url INTEGER NOT NULL DEFAULT 0,
 	media_uid TEXT NOT NULL DEFAULT '',
 	forward_external INTEGER NOT NULL DEFAULT 0,
+	fwd_source TEXT NOT NULL DEFAULT '',
 	ts INTEGER NOT NULL,
 	UNIQUE(chat_id, msg_id)
 );
@@ -82,6 +84,27 @@ func OpenStore(path string) (*Store, error) {
 		_ = db.Close()
 		return nil, fmt.Errorf("migrate db: %w", err)
 	}
+	// migration for DBs created before fwd_source existed
+	rows, err := db.Query(`PRAGMA table_info(messages)`)
+	if err == nil {
+		hasFwd := false
+		for rows.Next() {
+			var cid int
+			var name, ctype string
+			var notnull, pk int
+			var dflt any
+			if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == "fwd_source" {
+				hasFwd = true
+			}
+		}
+		rows.Close()
+		if !hasFwd {
+			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN fwd_source TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("migrate db (fwd_source): %w", err)
+			}
+		}
+	}
 	return &Store{db: db}, nil
 }
 
@@ -93,25 +116,27 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) AddMessage(m StoredMessage) error {
 	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, b2i(m.ForwardExternal), m.TS)
+		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, ts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, b2i(m.ForwardExternal), m.FwdSource, m.TS)
 	return err
 }
 
 // FindDuplicates returns stored messages from the window that match
-// the incoming message: either the same normalized text or the same
-// media file_unique_id. Ordered oldest first so [0] is the original.
-func (s *Store) FindDuplicates(chatID int64, since int64, normText, mediaUID string, exceptMsgID int) ([]StoredMessage, error) {
+// the incoming message: the same normalized text, the same media
+// file_unique_id, or the same forward source. Ordered oldest first
+// so [0] is the original.
+func (s *Store) FindDuplicates(chatID int64, since int64, normText, mediaUID, fwdSource string, exceptMsgID int) ([]StoredMessage, error) {
 	rows, err := s.db.Query(
-		`SELECT chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, ts
+		`SELECT chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, ts
 		 FROM messages
 		 WHERE chat_id = ? AND ts >= ? AND msg_id != ?
 		   AND ( (media_uid != '' AND media_uid = ?)
-		         OR (media_uid = '' AND norm_text != '' AND norm_text = ?) )
+		         OR (media_uid = '' AND norm_text != '' AND norm_text = ?)
+		         OR (fwd_source != '' AND fwd_source = ?) )
 		 ORDER BY ts ASC, id ASC
 		 LIMIT 20`,
-		chatID, since, exceptMsgID, mediaUID, normText)
+		chatID, since, exceptMsgID, mediaUID, normText, fwdSource)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +146,7 @@ func (s *Store) FindDuplicates(chatID int64, since int64, normText, mediaUID str
 	for rows.Next() {
 		var m StoredMessage
 		var hasURL, fe int
-		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &fe, &m.TS); err != nil {
+		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &fe, &m.FwdSource, &m.TS); err != nil {
 			return nil, err
 		}
 		m.HasURL = hasURL != 0

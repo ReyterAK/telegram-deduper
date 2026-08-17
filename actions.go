@@ -78,8 +78,8 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 	link := messageLink(c.ChatID, c.MsgID, d.chatUsername)
 
 	// Link for the delete notice: the in-chat original when one
-	// exists; for external forwards — the source post; otherwise
-	// no link (the message is replaced by plain text).
+	// exists; otherwise fall back to the forward's source post;
+	// with no link the notice degrades to plain text.
 	origLink := c.SourceLink
 	if original.MsgID > 0 {
 		origLink = messageLink(c.ChatID, original.MsgID, d.chatUsername)
