@@ -93,7 +93,9 @@ func DefaultConfig() *Config {
 			},
 			Message: ReactionSettings{
 				SameParticipant: ReactionDelete,
-				DiffParticipant: ReactionDelete,
+				// Text duplicates from DIFFERENT users are normal
+				// conversation ("Привет" twice) — not moderated.
+				DiffParticipant: ReactionIgnore,
 			},
 		},
 		Warnings: Warnings{

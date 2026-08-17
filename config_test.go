@@ -14,8 +14,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Reactions.Link.SameParticipant != ReactionDelete ||
 		cfg.Reactions.Link.DiffParticipant != ReactionDelete ||
 		cfg.Reactions.Message.SameParticipant != ReactionDelete ||
-		cfg.Reactions.Message.DiffParticipant != ReactionDelete {
-		t.Fatalf("default reactions must be delete: %+v", cfg.Reactions)
+		cfg.Reactions.Message.DiffParticipant != ReactionIgnore {
+		t.Fatalf("unexpected default reactions: %+v", cfg.Reactions)
 	}
 	if cfg.Warnings.SameParticipant.Threshold != 0 {
 		t.Fatalf("warnings must be off by default: %+v", cfg.Warnings)
