@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"log"
 	"strconv"
-	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -42,9 +41,18 @@ func messageLink(chatID int64, msgID int, chatUsername string) string {
 	if chatUsername != "" {
 		return fmt.Sprintf("https://t.me/%s/%d", chatUsername, msgID)
 	}
-	// t.me/c/<id>/<msg> — id without the leading minus.
-	id := strings.TrimPrefix(strconv.FormatInt(chatID, 10), "-")
-	return fmt.Sprintf("https://t.me/c/%s/%d", id, msgID)
+	return fmt.Sprintf("https://t.me/c/%s/%d", chatLinkID(chatID), msgID)
+}
+
+// chatLinkID converts a Telegram chat id to the form used in
+// t.me/c/ links: for supergroups/channels the "-100" marker is
+// dropped (t.me/c/4307533132/60, not .../1004307533132/60);
+// otherwise just the leading minus.
+func chatLinkID(chatID int64) string {
+	if chatID <= -1000000000000 { // supergroup/channel
+		return strconv.FormatInt(-(chatID + 1000000000000), 10)
+	}
+	return strconv.FormatInt(-chatID, 10)
 }
 
 // chatMessageLink builds a link to a message in an arbitrary chat
@@ -71,6 +79,14 @@ func (d *Detector) reactionFor(typ DupType, cat DupCategory) Reaction {
 	return rs.DiffParticipant
 }
 
+// withAuthor appends the author's name to a reaction text.
+func withAuthor(text, name string) string {
+	if name == "" {
+		return text
+	}
+	return text + " — " + name
+}
+
 // react executes the configured reaction for a detected duplicate.
 // original is the first occurrence (empty for external forwards).
 func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original StoredMessage, now time.Time) {
@@ -90,7 +106,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 		return
 
 	case ReactionComment:
-		text := fmt.Sprintf(commentTemplate(typ), link)
+		text := withAuthor(fmt.Sprintf(commentTemplate(typ), link), c.AuthorName)
 		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
 		msg := tgbotapi.NewMessage(c.ChatID, text)
 		msg.ReplyToMessageID = c.MsgID
@@ -106,7 +122,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 			log.Printf("[action] удаление дубля: %v", err)
 			return
 		}
-		text := deletedMessageText(typ, origLink)
+		text := withAuthor(deletedMessageText(typ, origLink), c.AuthorName)
 		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
 		sent, err := d.bot.Send(tgbotapi.NewMessage(c.ChatID, text))
 		if err != nil {
@@ -117,7 +133,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 	}
 
 	// Warning accounting happens for comment/delete reactions only.
-	d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now)
+	d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now, c.AuthorName)
 }
 
 // deletedMessageText builds the delete notice; without a link the

@@ -12,6 +12,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"strconv"
 	"time"
@@ -33,8 +34,8 @@ func (d *Detector) warningSettingsFor(cat DupCategory) WarningSettings {
 }
 
 // warnAndMaybeBan records a warning event and bans when the
-// threshold is reached.
-func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now time.Time) {
+// threshold is reached. authorName is shown in the ban notice.
+func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now time.Time, authorName string) {
 	ws := d.warningSettingsFor(cat)
 	if ws.Threshold <= 0 {
 		return
@@ -81,4 +82,25 @@ func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now ti
 	}
 	log.Printf("[warn] пользователь %d: бан %s на %d суток (%d/%d предупреждений)",
 		userID, ws.BanType, ws.BanDays, count, ws.Threshold)
+
+	// Public ban notice with the offender's name.
+	name := authorName
+	if name == "" {
+		name = strconv.FormatInt(userID, 10)
+	}
+	notice := fmt.Sprintf("Участник %s: бан (%s) на %d суток",
+		name, banTypeLabel(ws.BanType), ws.BanDays)
+	sent, err := d.bot.Send(tgbotapi.NewMessage(chatID, notice))
+	if err != nil {
+		log.Printf("[warn] уведомление о бане: %v", err)
+		return
+	}
+	d.scheduleAutoDelete(sent)
+}
+
+func banTypeLabel(banType string) string {
+	if banType == "kick" {
+		return "удаление из чата"
+	}
+	return "только чтение"
 }

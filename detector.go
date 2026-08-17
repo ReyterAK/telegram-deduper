@@ -20,6 +20,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -30,6 +31,7 @@ type MsgContent struct {
 	ChatID          int64
 	MsgID           int
 	UserID          int64
+	AuthorName      string
 	NormText        string
 	HasURL          bool
 	MediaUID        string
@@ -81,6 +83,7 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 		ChatID:          chatID,
 		MsgID:           m.MessageID,
 		UserID:          userIDOf(m),
+		AuthorName:      displayName(m.From),
 		NormText:        norm,
 		HasURL:          norm != "" && HasURL(norm),
 		MediaUID:        mediaUID,
@@ -95,6 +98,18 @@ func userIDOf(m *tgbotapi.Message) int64 {
 		return m.From.ID
 	}
 	return 0
+}
+
+// displayName renders a user for reaction texts: @username when
+// available, otherwise "First Last".
+func displayName(u *tgbotapi.User) string {
+	if u == nil {
+		return ""
+	}
+	if u.UserName != "" {
+		return "@" + u.UserName
+	}
+	return strings.TrimSpace(u.FirstName + " " + u.LastName)
 }
 
 // mediaUniqueID returns the content fingerprint for media messages

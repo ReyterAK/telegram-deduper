@@ -165,10 +165,56 @@ func TestDeletedMessageText(t *testing.T) {
 }
 
 func TestMessageLink(t *testing.T) {
-	if got := messageLink(-100123456789, 5, "mychat"); got != "https://t.me/mychat/5" {
+	if got := messageLink(-1004307533132, 5, "mychat"); got != "https://t.me/mychat/5" {
 		t.Fatalf("username link = %q", got)
 	}
-	if got := messageLink(-100123456789, 5, ""); got != "https://t.me/c/100123456789/5" {
-		t.Fatalf("c link = %q", got)
+	// supergroup: the "-100" marker is dropped from c/ links
+	if got := messageLink(-1004307533132, 5, ""); got != "https://t.me/c/4307533132/5" {
+		t.Fatalf("supergroup c link = %q", got)
+	}
+	// basic group: only the minus is dropped
+	if got := messageLink(-123456789, 5, ""); got != "https://t.me/c/123456789/5" {
+		t.Fatalf("basic group c link = %q", got)
+	}
+}
+
+func TestChatLinkID(t *testing.T) {
+	cases := []struct {
+		id   int64
+		want string
+	}{
+		{-1004307533132, "4307533132"},
+		{-1001234567890, "1234567890"},
+		{-123456789, "123456789"},
+		{-100, "100"},
+	}
+	for _, c := range cases {
+		if got := chatLinkID(c.id); got != c.want {
+			t.Errorf("chatLinkID(%d) = %q, want %q", c.id, got, c.want)
+		}
+	}
+}
+
+func TestDisplayName(t *testing.T) {
+	if got := displayName(&tgbotapi.User{UserName: "ivan"}); got != "@ivan" {
+		t.Fatalf("username name = %q", got)
+	}
+	if got := displayName(&tgbotapi.User{FirstName: "Иван", LastName: "Петров"}); got != "Иван Петров" {
+		t.Fatalf("full name = %q", got)
+	}
+	if got := displayName(&tgbotapi.User{FirstName: "Иван"}); got != "Иван" {
+		t.Fatalf("first name = %q", got)
+	}
+	if got := displayName(nil); got != "" {
+		t.Fatalf("nil name = %q", got)
+	}
+}
+
+func TestWithAuthor(t *testing.T) {
+	if got := withAuthor("Удален дубль сообщения X", "@ivan"); got != "Удален дубль сообщения X — @ivan" {
+		t.Fatalf("with author = %q", got)
+	}
+	if got := withAuthor("Удален дубль сообщения X", ""); got != "Удален дубль сообщения X" {
+		t.Fatalf("empty author = %q", got)
 	}
 }
