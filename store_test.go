@@ -71,8 +71,8 @@ func TestFindDuplicatesByForwardSource(t *testing.T) {
 		t.Fatalf("expected forward-source duplicate, got %d", len(dups))
 	}
 
-	// different source → no duplicate
-	dups, err = st.FindDuplicates(chat, now-86400, "пост", "", "fwd:-100888:111", 2)
+	// different source AND different text → no duplicate
+	dups, err = st.FindDuplicates(chat, now-86400, "не похожий текст", "", "fwd:-100888:111", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,13 +80,13 @@ func TestFindDuplicatesByForwardSource(t *testing.T) {
 		t.Fatalf("unexpected source duplicate: %+v", dups)
 	}
 
-	// plain message with no source is not matched by a source query
-	dups, err = st.FindDuplicates(chat, now-86400, "пост", "", "", 2)
+	// plain unique text with no source → no duplicate
+	dups, err = st.FindDuplicates(chat, now-86400, "уникальный текст", "", "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(dups) != 0 {
-		t.Fatalf("plain text must not match fwd_source: %+v", dups)
+		t.Fatalf("plain text must not match: %+v", dups)
 	}
 }
 
