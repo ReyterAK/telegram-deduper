@@ -1,0 +1,147 @@
+package main
+
+import "testing"
+
+func newTestStore(t *testing.T) *Store {
+	t.Helper()
+	st, err := OpenStore(":memory:")
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	t.Cleanup(func() { st.Close() })
+	return st
+}
+
+func TestFindDuplicatesByText(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, NormText: "привет мир", TS: now})
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 2, UserID: 20, NormText: "другое сообщение", TS: now})
+
+	dups, err := st.FindDuplicates(chat, now-86400, "привет мир", "", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 1 || dups[0].MsgID != 1 || dups[0].UserID != 10 {
+		t.Fatalf("expected 1 duplicate by text, got %+v", dups)
+	}
+}
+
+func TestFindDuplicatesByMedia(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, MediaUID: "uid-abc", TS: now})
+
+	// same media → duplicate
+	dups, err := st.FindDuplicates(chat, now-86400, "", "uid-abc", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 1 {
+		t.Fatalf("expected media duplicate, got %d", len(dups))
+	}
+
+	// different media → no duplicate
+	dups, err = st.FindDuplicates(chat, now-86400, "", "uid-xyz", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 0 {
+		t.Fatalf("unexpected media duplicate: %+v", dups)
+	}
+}
+
+func TestFindDuplicatesOrderOldestFirst(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 5, UserID: 10, NormText: "дубль", TS: now - 200})
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 9, UserID: 20, NormText: "дубль", TS: now - 100})
+
+	dups, err := st.FindDuplicates(chat, now-86400, "дубль", "", 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dups) != 2 {
+		t.Fatalf("expected 2 duplicates, got %d", len(dups))
+	}
+	if dups[0].MsgID != 5 { // original = oldest
+		t.Fatalf("original must be the oldest, got msg_id=%d", dups[0].MsgID)
+	}
+}
+
+func TestRetentionCleanup(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, NormText: "старое", TS: now - 20*86400})
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 2, UserID: 10, NormText: "свежее", TS: now})
+	st.AddWarning(chat, 10, now-20*86400)
+
+	if err := st.CleanupRetention(chat, 10); err != nil {
+		t.Fatal(err)
+	}
+
+	dups, _ := st.FindDuplicates(chat, now-10*86400, "старое", "", 99)
+	if len(dups) != 0 {
+		t.Fatalf("old message survived cleanup: %+v", dups)
+	}
+	dups, _ = st.FindDuplicates(chat, now-10*86400, "свежее", "", 99)
+	if len(dups) != 1 {
+		t.Fatalf("fresh message lost: %+v", dups)
+	}
+	if n, _ := st.CountWarnings(chat, 10, now-10*86400); n != 0 {
+		t.Fatalf("old warning survived cleanup: %d", n)
+	}
+}
+
+func TestWarningsLifecycle(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	if n, _ := st.CountWarnings(chat, 42, now-86400); n != 0 {
+		t.Fatal("expected 0 warnings initially")
+	}
+	st.AddWarning(chat, 42, now)
+	if n, _ := st.CountWarnings(chat, 42, now-86400); n != 1 {
+		t.Fatalf("expected 1 warning, got %d", n)
+	}
+	// old warning outside lifetime does not count
+	if n, _ := st.CountWarnings(chat, 42, now); n != 1 {
+		t.Fatalf("warning from the future counted: %d", n)
+	}
+	st.ResetWarnings(chat, 42)
+	if n, _ := st.CountWarnings(chat, 42, now-86400); n != 0 {
+		t.Fatalf("expected 0 warnings after reset, got %d", n)
+	}
+}
+
+func TestBotMessagesLifecycle(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddBotMessage(chat, 100, now-10)
+	st.AddBotMessage(chat, 101, now+3600)
+
+	due, err := st.DueBotMessages(now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(due) != 1 || due[0].MsgID != 100 {
+		t.Fatalf("expected 1 due message, got %+v", due)
+	}
+
+	st.RemoveBotMessage(chat, 100)
+	due, _ = st.DueBotMessages(now)
+	if len(due) != 0 {
+		t.Fatalf("removed message still due: %+v", due)
+	}
+}
