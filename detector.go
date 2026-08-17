@@ -100,16 +100,21 @@ func userIDOf(m *tgbotapi.Message) int64 {
 	return 0
 }
 
-// displayName renders a user for reaction texts: @username when
-// available, otherwise "First Last".
+// displayName renders a user for reaction texts: "@username
+// (Имя Фамилия)" when both are known, "@username" or "Имя Фамилия"
+// otherwise.
 func displayName(u *tgbotapi.User) string {
 	if u == nil {
 		return ""
 	}
+	realName := strings.TrimSpace(u.FirstName + " " + u.LastName)
 	if u.UserName != "" {
+		if realName != "" {
+			return "@" + u.UserName + " (" + realName + ")"
+		}
 		return "@" + u.UserName
 	}
-	return strings.TrimSpace(u.FirstName + " " + u.LastName)
+	return realName
 }
 
 // mediaUniqueID returns the content fingerprint for media messages

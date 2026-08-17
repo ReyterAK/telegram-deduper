@@ -122,9 +122,21 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 			log.Printf("[action] удаление дубля: %v", err)
 			return
 		}
-		text := withAuthor(deletedMessageText(typ, origLink), c.AuthorName)
+		text := withAuthor(deletedShortText(typ), c.AuthorName)
 		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
-		sent, err := d.bot.Send(tgbotapi.NewMessage(c.ChatID, text))
+
+		// Post the notice as a REPLY to the original message, so the
+		// quoted content shows which message was duplicated.
+		msg := tgbotapi.NewMessage(c.ChatID, text)
+		msg.ReplyToMessageID = original.MsgID
+		sent, err := d.bot.Send(msg)
+		if err != nil && original.MsgID > 0 {
+			// Reply failed (original gone?) → standalone with a link.
+			log.Printf("[action] ответ на оригинал не прошёл (%v), шлю со ссылкой", err)
+			fallback := withAuthor(deletedMessageText(typ, origLink), c.AuthorName)
+			fallback = d.appendWarningLine(fallback, c.ChatID, c.UserID, cat, now)
+			sent, err = d.bot.Send(tgbotapi.NewMessage(c.ChatID, fallback))
+		}
 		if err != nil {
 			log.Printf("[action] уведомление об удалении: %v", err)
 			return
@@ -134,6 +146,15 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 
 	// Warning accounting happens for comment/delete reactions only.
 	d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now, c.AuthorName)
+}
+
+// deletedShortText is the reply-form delete notice (no link — the
+// quoted original serves as the reference).
+func deletedShortText(typ DupType) string {
+	if typ == DupTypeLink {
+		return "Удален дубль ссылки"
+	}
+	return "Удален дубль сообщения"
 }
 
 // deletedMessageText builds the delete notice; without a link the

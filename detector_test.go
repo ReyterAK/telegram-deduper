@@ -197,7 +197,10 @@ func TestChatLinkID(t *testing.T) {
 
 func TestDisplayName(t *testing.T) {
 	if got := displayName(&tgbotapi.User{UserName: "ivan"}); got != "@ivan" {
-		t.Fatalf("username name = %q", got)
+		t.Fatalf("username only = %q", got)
+	}
+	if got := displayName(&tgbotapi.User{UserName: "ivan", FirstName: "Иван", LastName: "Петров"}); got != "@ivan (Иван Петров)" {
+		t.Fatalf("username + name = %q", got)
 	}
 	if got := displayName(&tgbotapi.User{FirstName: "Иван", LastName: "Петров"}); got != "Иван Петров" {
 		t.Fatalf("full name = %q", got)
@@ -211,10 +214,19 @@ func TestDisplayName(t *testing.T) {
 }
 
 func TestWithAuthor(t *testing.T) {
-	if got := withAuthor("Удален дубль сообщения X", "@ivan"); got != "Удален дубль сообщения X — @ivan" {
+	if got := withAuthor("Удален дубль сообщения", "@ivan (Иван Петров)"); got != "Удален дубль сообщения — @ivan (Иван Петров)" {
 		t.Fatalf("with author = %q", got)
 	}
-	if got := withAuthor("Удален дубль сообщения X", ""); got != "Удален дубль сообщения X" {
+	if got := withAuthor("Удален дубль сообщения", ""); got != "Удален дубль сообщения" {
 		t.Fatalf("empty author = %q", got)
+	}
+}
+
+func TestDeletedShortText(t *testing.T) {
+	if got := deletedShortText(DupTypeLink); got != "Удален дубль ссылки" {
+		t.Fatalf("link short = %q", got)
+	}
+	if got := deletedShortText(DupTypeMessage); got != "Удален дубль сообщения" {
+		t.Fatalf("message short = %q", got)
 	}
 }
