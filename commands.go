@@ -169,7 +169,7 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		"в течение этого срока считается дублем.\n" +
 		"Картинки: " + photoModeLabel(s.PhotoMode) + "\n" +
 		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
-		"Старые сообщения (после простоя): " + reactToOldLabel(s.ReactToOld) + "\n" +
+		"Старые сообщения после простоя (до 24 ч): " + reactToOldLabel(s.ReactToOld) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -197,7 +197,7 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("Строгая", "delpol:"+DeletedOriginalStrict),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Старые сообщения: "+reactToOldLabel(s.ReactToOld), "old:view"),
+			btn("Старые (до 24 ч): "+reactToOldLabel(s.ReactToOld), "old:view"),
 			btn("Не реагировать", "old:no"),
 			btn("Реагировать", "old:yes"),
 		),
