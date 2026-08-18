@@ -153,7 +153,7 @@ func deletedOriginalLabel(p string) string {
 	if p == DeletedOriginalAllow {
 		return "пропускать"
 	}
-	return "строгая"
+	return "реагировать"
 }
 
 func reactToOldLabel(b bool) string {
@@ -193,8 +193,8 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Удалённый оригинал: "+deletedOriginalLabel(s.DeletedOriginalPolicy), "delpol:view"),
+			btn("Реагировать", "delpol:"+DeletedOriginalStrict),
 			btn("Пропускать", "delpol:"+DeletedOriginalAllow),
-			btn("Строгая", "delpol:"+DeletedOriginalStrict),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Старые (до 24 ч): "+reactToOldLabel(s.ReactToOld), "old:view"),

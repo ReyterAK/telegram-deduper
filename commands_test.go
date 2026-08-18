@@ -44,7 +44,7 @@ func TestLabels(t *testing.T) {
 	if got := deletedOriginalLabel(DeletedOriginalAllow); got != "пропускать" {
 		t.Fatalf("allow = %q", got)
 	}
-	if got := deletedOriginalLabel(DeletedOriginalStrict); got != "строгая" {
+	if got := deletedOriginalLabel(DeletedOriginalStrict); got != "реагировать" {
 		t.Fatalf("strict = %q", got)
 	}
 }
