@@ -33,11 +33,40 @@ func warningSettingsFor(s *Settings, cat DupCategory) WarningSettings {
 	return s.Warnings.DiffParticipant
 }
 
+// isBannedStatus reports whether a chat member status means the user
+// cannot send messages (banned or restricted).
+func isBannedStatus(status string) bool {
+	return status == "kicked" || status == "restricted"
+}
+
+// userBanned reports whether the user is currently banned/muted in
+// the chat. Banned users get no warning accounting — duplicates are
+// still deleted with a notice, but the counter does not grow and no
+// second ban is issued.
+func (d *Detector) userBanned(chatID, userID int64) bool {
+	member, err := d.bot.GetChatMember(tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{
+			ChatID: chatID,
+			UserID: userID,
+		},
+	})
+	if err != nil {
+		log.Printf("[warn] getChatMember (%d): %v", userID, err)
+		return false
+	}
+	return isBannedStatus(member.Status)
+}
+
 // warnAndMaybeBan records a warning event and bans when the
 // threshold is reached. authorName is shown in the ban notice.
 func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now time.Time, authorName string, s *Settings) {
 	ws := warningSettingsFor(s, cat)
 	if ws.Threshold <= 0 {
+		return
+	}
+	// Already banned/muted: no warnings, no repeated bans.
+	if d.userBanned(chatID, userID) {
+		log.Printf("[warn] пользователь %d уже ограничен — предупреждение не выносится", userID)
 		return
 	}
 

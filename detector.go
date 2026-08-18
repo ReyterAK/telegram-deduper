@@ -255,6 +255,9 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	if m.From == nil {
 		return
 	}
+	if m.From.IsBot {
+		return // other bots' messages are not moderated
+	}
 	if m.From.ID == d.bot.Self.ID {
 		return
 	}

@@ -170,6 +170,19 @@ func TestHelpText(t *testing.T) {
 	}
 }
 
+func TestIsBannedStatus(t *testing.T) {
+	for _, s := range []string{"kicked", "restricted"} {
+		if !isBannedStatus(s) {
+			t.Fatalf("%q must be banned", s)
+		}
+	}
+	for _, s := range []string{"administrator", "creator", "member", "left", ""} {
+		if isBannedStatus(s) {
+			t.Fatalf("%q must NOT be banned", s)
+		}
+	}
+}
+
 func TestReactToOldLabel(t *testing.T) {
 	if got := reactToOldLabel(false); got != "не реагировать" {
 		t.Fatalf("false = %q", got)
