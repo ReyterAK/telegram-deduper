@@ -62,6 +62,15 @@ type Detector struct {
 	settings map[int64]*Settings
 	chatName map[int64]string
 	chatAdmin map[int64]bool
+	pending  map[int64]pendingInput
+}
+
+// pendingInput remembers a text-value request until the user replies.
+type pendingInput struct {
+	userID    int64
+	field     string
+	menuMsgID int
+	at        time.Time
 }
 
 func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string) *Detector {
@@ -73,6 +82,7 @@ func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string
 		settings:   map[int64]*Settings{},
 		chatName:   map[int64]string{},
 		chatAdmin:  map[int64]bool{},
+		pending:    map[int64]pendingInput{},
 	}
 }
 

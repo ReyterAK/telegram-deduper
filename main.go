@@ -88,6 +88,8 @@ func main() {
 			if update.Message != nil {
 				if update.Message.IsCommand() {
 					det.HandleCommand(update.Message)
+				} else if det.HandleTextInput(update.Message) {
+					// consumed as a settings value
 				} else {
 					det.Process(update.Message)
 				}

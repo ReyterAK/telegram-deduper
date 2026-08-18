@@ -17,6 +17,7 @@ import (
 	"log"
 	"strconv"
 	"strings"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -206,6 +207,7 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("Период слежения: "+strconv.Itoa(s.RetentionDays)+" сут", "ret:view"),
 			btn("−", "ret:-1"),
 			btn("+", "ret:+1"),
+			btn("✏️", "in:retention"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Реакции: ссылка", "m:react:link"),
@@ -231,12 +233,14 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("−5", "fresh:-1"),
 			btn("+5", "fresh:+1"),
 			btn("выкл", "fresh:off"),
+			btn("✏️", "in:freshness"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Автоудаление: "+autoDeleteLabel(s.AutoDeleteHours), "ad:view"),
 			btn("выкл", "ad:off"),
 			btn("−", "ad:-1"),
 			btn("+", "ad:+1"),
+			btn("✏️", "in:autodel"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Закрыть", "close"),
@@ -300,11 +304,13 @@ func (d *Detector) warningsMenu(cat DupCategory, s *Settings) (string, tgbotapi.
 			btn("выкл", prefix+":thr:off"),
 			btn("−", prefix+":thr:-1"),
 			btn("+", prefix+":thr:+1"),
+			btn("✏️", "in:"+prefix+":thr"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Срок жизни: "+strconv.Itoa(ws.LifetimeDays)+" сут", "noop"),
 			btn("−", prefix+":life:-1"),
 			btn("+", prefix+":life:+1"),
+			btn("✏️", "in:"+prefix+":life"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Тип бана: "+banTypeLabelShort(ws.BanType), "noop"),
@@ -315,6 +321,7 @@ func (d *Detector) warningsMenu(cat DupCategory, s *Settings) (string, tgbotapi.
 			btn("Срок бана: "+strconv.Itoa(ws.BanDays)+" сут", "noop"),
 			btn("−", prefix+":days:-1"),
 			btn("+", prefix+":days:+1"),
+			btn("✏️", "in:"+prefix+":days"),
 		),
 		tgbotapi.NewInlineKeyboardRow(btn("← Назад", "m:main")),
 	)
@@ -378,6 +385,18 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		case "-1":
 			s.AutoDeleteHours = clamp(s.AutoDeleteHours-1, 0, maxAuto)
 			changed = true
+		}
+	case "in":
+		if len(parts) == 2 && findNumericField(parts[1]) != nil {
+			d.pending[chatID] = pendingInput{
+				userID:    cq.From.ID,
+				field:     parts[1],
+				menuMsgID: msgID,
+				at:        time.Now(),
+			}
+			_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, inputPrompt(s, parts[1])))
+			_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
+			return
 		}
 	case "fresh":
 		switch parts[1] {
