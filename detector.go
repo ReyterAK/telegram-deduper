@@ -28,6 +28,14 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// Media type constants (which part of a message is perceptually
+// hashed).
+const (
+	MediaTypePhoto    = "photo"
+	MediaTypeVideo    = "video"
+	MediaTypeDocument = "document"
+)
+
 // MsgContent is the comparable essence of an incoming message.
 type MsgContent struct {
 	ChatID          int64
@@ -37,6 +45,7 @@ type MsgContent struct {
 	NormText        string
 	HasURL          bool
 	MediaUID        string
+	MediaType       string
 	ForwardExternal bool
 	// FwdSource identifies the origin of an external forward
 	// ("fwd:<chat_id>:<msg_id>", "" when unknown/not a forward).
@@ -44,8 +53,8 @@ type MsgContent struct {
 	// SourceLink points at the original post for external forwards
 	// ("" when the source is unknown).
 	SourceLink string
-	// PhotoHash is the perceptual dHash of a photo message ("" when
-	// not computed).
+	// PhotoHash is the perceptual dHash of the media (photo, or the
+	// thumbnail of a video/document; "" when not computed).
 	PhotoHash string
 }
 
@@ -153,6 +162,12 @@ func (d *Detector) settingsFor(chatID int64) *Settings {
 		if !hasJSONKey([]byte(raw), "freshness_minutes") {
 			s.FreshnessMinutes = DefaultFreshnessMinutes
 		}
+		if !hasJSONKey([]byte(raw), "video_mode") {
+			s.VideoMode = PhotoModePerceptual
+		}
+		if !hasJSONKey([]byte(raw), "doc_mode") {
+			s.DocMode = PhotoModePerceptual
+		}
 	} else if err == nil {
 		// first contact — persist the defaults
 		d.persistSettings(chatID, s)
@@ -212,6 +227,15 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 	}
 	norm := NormalizeText(text)
 	mediaUID := mediaUniqueID(m)
+	mediaType := ""
+	switch {
+	case len(m.Photo) > 0:
+		mediaType = MediaTypePhoto
+	case m.Video != nil:
+		mediaType = MediaTypeVideo
+	case m.Document != nil:
+		mediaType = MediaTypeDocument
+	}
 	forwardExternal := forwardOriginExternal(m, chatID)
 	fwdSource := ""
 	sourceLink := ""
@@ -227,6 +251,7 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 		NormText:        norm,
 		HasURL:          norm != "" && HasURL(norm),
 		MediaUID:        mediaUID,
+		MediaType:       mediaType,
 		ForwardExternal: forwardExternal,
 		FwdSource:       fwdSource,
 		SourceLink:      sourceLink,
@@ -311,6 +336,33 @@ func shouldReact(s *Settings, msgDate, now int64) bool {
 	return now-msgDate <= int64(s.FreshnessMinutes)*60
 }
 
+// MediaMode returns the comparison mode configured for a media
+// type (photo/video/document); unknown types fall back to photo.
+func (s *Settings) MediaMode(mediaType string) string {
+	switch mediaType {
+	case MediaTypeVideo:
+		return s.VideoMode
+	case MediaTypeDocument:
+		return s.DocMode
+	default:
+		return s.PhotoMode
+	}
+}
+
+// mediaThreshold returns the Hamming threshold for a media type:
+// photos use the looser PhotoHashThreshold, thumbnails (video and
+// documents) the stricter MediaThumbThreshold — two different
+// videos/docs often share similar first frames, so they need a
+// tighter bound to avoid false positives.
+func mediaThreshold(mediaType string) int {
+	switch mediaType {
+	case MediaTypeVideo, MediaTypeDocument:
+		return MediaThumbThreshold
+	default:
+		return PhotoHashThreshold
+	}
+}
+
 // Process handles one incoming message: store, detect, react.
 func (d *Detector) Process(m *tgbotapi.Message) {
 	// Only group/supergroup messages from identifiable users.
@@ -356,8 +408,8 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	// missed updates late): remember the content with its real time,
 	// but do not react — no retroactive deletions/notices/warnings.
 	if !shouldReact(s, ts, now.Unix()) {
-		if s.PhotoMode == PhotoModePerceptual && c.MediaUID != "" && len(m.Photo) > 0 {
-			if ph, err := d.photoHash(m); err == nil {
+		if s.MediaMode(c.MediaType) == PhotoModePerceptual && c.MediaUID != "" {
+			if ph, err := d.mediaHash(m, c.MediaType); err == nil {
 				c.PhotoHash = ph
 			}
 		}
@@ -377,22 +429,25 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 		log.Printf("[detect] поиск дублей: %v", err)
 	}
 
-	// Perceptual photo match: when the exact file match found
-	// nothing and photo comparison by content is enabled, download
-	// the image and compare its dHash against the window.
-	if len(dups) == 0 && s.PhotoMode == PhotoModePerceptual &&
-		c.MediaUID != "" && len(m.Photo) > 0 {
-		if ph, err := d.photoHash(m); err != nil {
-			log.Printf("[photo] хеш фотографии: %v", err)
+	// Perceptual content match: when the exact file match found
+	// nothing and content comparison is enabled for this media type
+	// (photo/video/document), download the image (a photo, or the
+	// thumbnail of a video/document) and compare its dHash against
+	// the window of the same media type.
+	if len(dups) == 0 && s.MediaMode(c.MediaType) == PhotoModePerceptual &&
+		c.MediaUID != "" {
+		if ph, err := d.mediaHash(m, c.MediaType); err != nil {
+			log.Printf("[media] хеш %s: %v", c.MediaType, err)
 		} else {
 			c.PhotoHash = ph
-			if pm, minDist, err := d.st.FindPhotoDuplicate(chatID, window, ph, PhotoHashThreshold); err != nil {
-				log.Printf("[photo] поиск по содержимому: %v", err)
+			threshold := mediaThreshold(c.MediaType)
+			if pm, minDist, err := d.st.FindPhotoDuplicate(chatID, window, c.MediaType, ph, threshold); err != nil {
+				log.Printf("[media] поиск по содержимому: %v", err)
 			} else if pm != nil {
-				log.Printf("[photo] фото совпало по содержимому с msg %d (hamming %d ≤ %d)", pm.MsgID, minDist, PhotoHashThreshold)
+				log.Printf("[media] %s совпал по содержимому с msg %d (hamming %d ≤ %d)", c.MediaType, pm.MsgID, minDist, threshold)
 				dups = []StoredMessage{*pm}
 			} else {
-				log.Printf("[photo] совпадений нет, ближайший хэш на расстоянии %d (порог %d)", minDist, PhotoHashThreshold)
+				log.Printf("[media] совпадений нет, ближайший хэш на расстоянии %d (порог %d)", minDist, threshold)
 			}
 		}
 	}
@@ -450,6 +505,7 @@ func (d *Detector) store(c MsgContent, ts int64) {
 		NormText:        c.NormText,
 		HasURL:          c.HasURL,
 		MediaUID:        c.MediaUID,
+		MediaType:       c.MediaType,
 		ForwardExternal: c.ForwardExternal,
 		FwdSource:       c.FwdSource,
 		PhotoHash:       c.PhotoHash,

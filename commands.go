@@ -210,6 +210,8 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		"Период слежения: " + strconv.Itoa(s.RetentionDays) + " сут — повтор сообщения\n" +
 		"в течение этого срока считается дублем.\n" +
 		"Картинки: " + photoModeLabel(s.PhotoMode) + "\n" +
+		"Видео: " + photoModeLabel(s.VideoMode) + "\n" +
+		"Документы: " + photoModeLabel(s.DocMode) + "\n" +
 		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
 		"Порог свежести: " + freshnessLabel(s.FreshnessMinutes) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
@@ -233,6 +235,18 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("по ID", "photo:"+PhotoModeExact),
 			btn("по содержимому", "photo:"+PhotoModePerceptual),
 			btn("выкл", "photo:"+PhotoModeOff),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Видео: "+photoModeLabel(s.VideoMode), "video:view"),
+			btn("по ID", "video:"+PhotoModeExact),
+			btn("по содержимому", "video:"+PhotoModePerceptual),
+			btn("выкл", "video:"+PhotoModeOff),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Документы: "+photoModeLabel(s.DocMode), "doc:view"),
+			btn("по ID", "doc:"+PhotoModeExact),
+			btn("по содержимому", "doc:"+PhotoModePerceptual),
+			btn("выкл", "doc:"+PhotoModeOff),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Удалённый оригинал: "+deletedOriginalLabel(s.DeletedOriginalPolicy), "delpol:view"),
@@ -434,6 +448,22 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 			switch parts[1] {
 			case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
 				s.PhotoMode = parts[1]
+				changed = true
+			}
+		}
+	case "video":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
+				s.VideoMode = parts[1]
+				changed = true
+			}
+		}
+	case "doc":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
+				s.DocMode = parts[1]
 				changed = true
 			}
 		}

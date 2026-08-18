@@ -93,6 +93,24 @@ func TestDHashDifferentImages(t *testing.T) {
 	}
 }
 
+func TestDistinctiveHash(t *testing.T) {
+	// near-uniform images (solid colour, blank pages, black
+	// openings) are not distinctive: their hash would collide with
+	// unrelated uniform images, so they must not be matched.
+	if _, ok := distinctiveHash(solidImage(50)); ok {
+		t.Fatal("solid image must not be distinctive")
+	}
+	if _, ok := distinctiveHash(solidImage(0)); ok {
+		t.Fatal("black image must not be distinctive")
+	}
+	if _, ok := distinctiveHash(gradientImage(64)); !ok {
+		t.Fatal("gradient must be distinctive")
+	}
+	if _, ok := distinctiveHash(noiseImage(64, 7)); !ok {
+		t.Fatal("noise must be distinctive")
+	}
+}
+
 func TestImageDecodeRegistered(t *testing.T) {
 	// Regression: image.Decode must know PNG/JPEG/GIF (blank imports).
 	var buf bytes.Buffer

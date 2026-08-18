@@ -171,7 +171,7 @@ func TestFindPhotoDuplicate(t *testing.T) {
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, PhotoHash: "ffffffffffffffff", TS: now})
 
 	// exact same hash → duplicate
-	m, minDist, err := st.FindPhotoDuplicate(chat, now-86400, "ffffffffffffffff", PhotoHashThreshold)
+	m, minDist, err := st.FindPhotoDuplicate(chat, now-86400, MediaTypePhoto, "ffffffffffffffff", PhotoHashThreshold)
 	if err != nil || m == nil || m.MsgID != 1 {
 		t.Fatalf("exact hash match failed: %+v err=%v", m, err)
 	}
@@ -179,17 +179,46 @@ func TestFindPhotoDuplicate(t *testing.T) {
 		t.Fatalf("exact match must have distance 0, got %d", minDist)
 	}
 	// one bit off → still a duplicate (within threshold)
-	m, _, err = st.FindPhotoDuplicate(chat, now-86400, "fffffffeffffffff", PhotoHashThreshold)
+	m, _, err = st.FindPhotoDuplicate(chat, now-86400, MediaTypePhoto, "fffffffeffffffff", PhotoHashThreshold)
 	if err != nil || m == nil {
 		t.Fatalf("near hash must match: %+v err=%v", m, err)
 	}
 	// all bits different → no duplicate, closest distance reported
-	m, minDist, err = st.FindPhotoDuplicate(chat, now-86400, "0000000000000000", PhotoHashThreshold)
+	m, minDist, err = st.FindPhotoDuplicate(chat, now-86400, MediaTypePhoto, "0000000000000000", PhotoHashThreshold)
 	if err != nil || m != nil {
 		t.Fatalf("far hash must not match: %+v err=%v", m, err)
 	}
 	if minDist != 64 {
 		t.Fatalf("closest distance = %d, want 64", minDist)
+	}
+}
+
+func TestFindPhotoDuplicateTypeFilter(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	// the same hash stored as a video must NOT match a photo query
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10,
+		MediaType: MediaTypeVideo, PhotoHash: "ffffffffffffffff", TS: now})
+
+	m, _, err := st.FindPhotoDuplicate(chat, now-86400, MediaTypePhoto, "ffffffffffffffff", PhotoHashThreshold)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m != nil {
+		t.Fatalf("video hash must not match photo query: %+v", m)
+	}
+	// same type does match
+	m, _, err = st.FindPhotoDuplicate(chat, now-86400, MediaTypeVideo, "ffffffffffffffff", MediaThumbThreshold)
+	if err != nil || m == nil {
+		t.Fatalf("video hash must match video query: %+v err=%v", m, err)
+	}
+	// legacy rows (media_type default 'photo') still match photos
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 2, UserID: 10, PhotoHash: "eeeeeeeeeeeeeeee", TS: now})
+	m, _, err = st.FindPhotoDuplicate(chat, now-86400, MediaTypePhoto, "eeeeeeeeeeeeeeee", PhotoHashThreshold)
+	if err != nil || m == nil || m.MsgID != 2 {
+		t.Fatalf("legacy photo row must match: %+v err=%v", m, err)
 	}
 }
 

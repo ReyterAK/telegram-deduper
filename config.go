@@ -80,6 +80,10 @@ type Config struct {
 	// PhotoMode: "exact" (file_unique_id), "perceptual" (dHash),
 	// "off" (photos are not compared).
 	PhotoMode string `json:"photo_mode"`
+	// VideoMode / DocMode: same enum, applied to video thumbnails
+	// and document thumbnails respectively.
+	VideoMode string `json:"video_mode"`
+	DocMode   string `json:"doc_mode"`
 	// DeletedOriginalPolicy: what happens when a duplicate is found
 	// but the original message is gone from the chat.
 	// "allow"  — the repeat is allowed (becomes the new original).
@@ -116,6 +120,8 @@ type Settings struct {
 	Warnings              Warnings   `json:"warnings"`
 	AutoDeleteHours       int        `json:"auto_delete_hours"`
 	PhotoMode             string     `json:"photo_mode"`
+	VideoMode             string     `json:"video_mode"`
+	DocMode               string     `json:"doc_mode"`
 	DeletedOriginalPolicy string     `json:"deleted_original_policy"`
 	FreshnessMinutes      int        `json:"freshness_minutes"`
 }
@@ -129,6 +135,8 @@ func (c *Config) asSettings() *Settings {
 		Warnings:              c.Warnings,
 		AutoDeleteHours:       c.AutoDeleteHours,
 		PhotoMode:             c.PhotoMode,
+		VideoMode:             c.VideoMode,
+		DocMode:               c.DocMode,
 		DeletedOriginalPolicy: c.DeletedOriginalPolicy,
 		FreshnessMinutes:      c.FreshnessMinutes,
 	}
@@ -180,6 +188,8 @@ func DefaultConfig() *Config {
 		},
 		AutoDeleteHours: 0,
 		PhotoMode:       PhotoModePerceptual,
+		VideoMode:       PhotoModePerceptual,
+		DocMode:         PhotoModePerceptual,
 		// Strict by default: once-flagged content stays flagged.
 		DeletedOriginalPolicy: DeletedOriginalStrict,
 		FreshnessMinutes:      DefaultFreshnessMinutes,
@@ -263,6 +273,18 @@ func (c *Config) validate() error {
 		log.Printf("[config] photo_mode=%q неизвестен, установлено %q", c.PhotoMode, PhotoModePerceptual)
 		c.PhotoMode = PhotoModePerceptual
 	}
+	switch c.VideoMode {
+	case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
+	default:
+		log.Printf("[config] video_mode=%q неизвестен, установлено %q", c.VideoMode, PhotoModePerceptual)
+		c.VideoMode = PhotoModePerceptual
+	}
+	switch c.DocMode {
+	case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
+	default:
+		log.Printf("[config] doc_mode=%q неизвестен, установлено %q", c.DocMode, PhotoModePerceptual)
+		c.DocMode = PhotoModePerceptual
+	}
 	switch c.DeletedOriginalPolicy {
 	case DeletedOriginalAllow, DeletedOriginalStrict:
 	default:
@@ -308,6 +330,12 @@ func LoadConfig(configPath string) (*Config, error) {
 	// migration: settings added after this config was written
 	if !hasJSONKey(data, "freshness_minutes") {
 		cfg.FreshnessMinutes = DefaultFreshnessMinutes
+	}
+	if !hasJSONKey(data, "video_mode") {
+		cfg.VideoMode = PhotoModePerceptual
+	}
+	if !hasJSONKey(data, "doc_mode") {
+		cfg.DocMode = PhotoModePerceptual
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

@@ -23,6 +23,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.AutoDeleteHours != 0 {
 		t.Fatalf("auto-delete must be off by default")
 	}
+	if cfg.PhotoMode != PhotoModePerceptual ||
+		cfg.VideoMode != PhotoModePerceptual ||
+		cfg.DocMode != PhotoModePerceptual {
+		t.Fatalf("content comparison must default to perceptual: %+v",
+			[]string{cfg.PhotoMode, cfg.VideoMode, cfg.DocMode})
+	}
 }
 
 func TestConfigValidationClamps(t *testing.T) {
@@ -45,6 +51,14 @@ func TestConfigValidationClamps(t *testing.T) {
 	}
 	if cfg.AutoDeleteHours != 0 {
 		t.Errorf("auto_delete not clamped: %d", cfg.AutoDeleteHours)
+	}
+	cfg.VideoMode = "bogus"
+	cfg.DocMode = "weird"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if cfg.VideoMode != PhotoModePerceptual || cfg.DocMode != PhotoModePerceptual {
+		t.Errorf("unknown media modes must be reset to perceptual: %q %q", cfg.VideoMode, cfg.DocMode)
 	}
 }
 

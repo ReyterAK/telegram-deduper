@@ -26,6 +26,7 @@ type StoredMessage struct {
 	NormText        string
 	HasURL          bool
 	MediaUID        string
+	MediaType       string
 	ForwardExternal bool
 	FwdSource       string
 	PhotoHash       string
@@ -50,6 +51,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	norm_text TEXT NOT NULL DEFAULT '',
 	has_url INTEGER NOT NULL DEFAULT 0,
 	media_uid TEXT NOT NULL DEFAULT '',
+	media_type TEXT NOT NULL DEFAULT 'photo',
 	forward_external INTEGER NOT NULL DEFAULT 0,
 	fwd_source TEXT NOT NULL DEFAULT '',
 	media_phash TEXT NOT NULL DEFAULT '',
@@ -97,6 +99,7 @@ func OpenStore(path string) (*Store, error) {
 	if err == nil {
 		hasFwd := false
 		hasPhash := false
+		hasMType := false
 		for rows.Next() {
 			var cid int
 			var name, ctype string
@@ -108,6 +111,8 @@ func OpenStore(path string) (*Store, error) {
 					hasFwd = true
 				case "media_phash":
 					hasPhash = true
+				case "media_type":
+					hasMType = true
 				}
 			}
 		}
@@ -124,6 +129,14 @@ func OpenStore(path string) (*Store, error) {
 				return nil, fmt.Errorf("migrate db (media_phash): %w", err)
 			}
 		}
+		// existing rows were all photos (only photos were hashed
+		// before this column existed), so 'photo' is the safe default
+		if !hasMType {
+			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN media_type TEXT NOT NULL DEFAULT 'photo'`); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("migrate db (media_type): %w", err)
+			}
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -135,17 +148,25 @@ func (s *Store) Close() error { return s.db.Close() }
 // ---------------------------------------------------------------------
 
 func (s *Store) AddMessage(m StoredMessage) error {
+	// Empty media type means "photo" — the schema default; only
+	// media messages carry a hash, and photos were the only type
+	// before media_type existed.
+	mediaType := m.MediaType
+	if mediaType == "" {
+		mediaType = MediaTypePhoto
+	}
 	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, media_phash, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, b2i(m.ForwardExternal), m.FwdSource, m.PhotoHash, m.TS)
+		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, media_type, forward_external, fwd_source, media_phash, ts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, mediaType, b2i(m.ForwardExternal), m.FwdSource, m.PhotoHash, m.TS)
 	return err
 }
 
-// FindPhotoDuplicate scans the window for a stored photo whose dHash
-// is within the Hamming threshold; the oldest match wins. Returns
-// nil when nothing is close enough, plus the closest distance seen.
-func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, threshold int) (*StoredMessage, int, error) {
+// FindPhotoDuplicate scans the window for a stored message of the
+// same media type whose dHash is within the Hamming threshold; the
+// oldest match wins. Returns nil when nothing is close enough,
+// plus the closest distance seen.
+func (s *Store) FindPhotoDuplicate(chatID int64, since int64, mediaType, phash string, threshold int) (*StoredMessage, int, error) {
 	needle, err := hex.DecodeString(phash)
 	if err != nil || len(needle) != 8 {
 		return nil, 64, nil
@@ -156,11 +177,11 @@ func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, thre
 	}
 
 	rows, err := s.db.Query(
-		`SELECT chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, media_phash, ts
+		`SELECT chat_id, msg_id, user_id, norm_text, has_url, media_uid, media_type, forward_external, fwd_source, media_phash, ts
 		 FROM messages
-		 WHERE chat_id = ? AND ts >= ? AND media_phash != ''
+		 WHERE chat_id = ? AND ts >= ? AND media_phash != '' AND media_type = ?
 		 ORDER BY ts ASC, id ASC
-		 LIMIT 500`, chatID, since)
+		 LIMIT 500`, chatID, since, mediaType)
 	if err != nil {
 		return nil, 64, err
 	}
@@ -170,7 +191,7 @@ func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, thre
 	for rows.Next() {
 		var m StoredMessage
 		var hasURL, fe int
-		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &fe, &m.FwdSource, &m.PhotoHash, &m.TS); err != nil {
+		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &m.MediaType, &fe, &m.FwdSource, &m.PhotoHash, &m.TS); err != nil {
 			return nil, 64, err
 		}
 		m.HasURL = hasURL != 0
