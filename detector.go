@@ -238,7 +238,7 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 	case m.Video != nil:
 		mediaType = MediaTypeVideo
 	case m.Document != nil:
-		mediaType = MediaTypeDocument
+		mediaType = documentMediaType(m.Document)
 	}
 	forwardExternal := forwardOriginExternal(m, chatID)
 	fwdSource := ""
@@ -262,6 +262,23 @@ func extractContent(m *tgbotapi.Message, chatID int64) MsgContent {
 	}
 }
 
+// documentMediaType maps a document to the media type it actually
+// carries. Telegram delivers videos and images as documents when the
+// sender picks "send as file" (mime video/mp4, image/png, ...); the
+// duplicate window must not care about the wrapper — a video is a
+// video whether it arrived as m.Video or as a video/* document.
+func documentMediaType(d *tgbotapi.Document) string {
+	switch {
+	case strings.HasPrefix(d.MimeType, "video/"):
+		return MediaTypeVideo
+	case strings.HasPrefix(d.MimeType, "image/"):
+		return MediaTypePhoto
+	default:
+		return MediaTypeDocument
+	}
+}
+
+// userIDOf returns the sender of the message.
 func userIDOf(m *tgbotapi.Message) int64 {
 	if m.From != nil {
 		return m.From.ID

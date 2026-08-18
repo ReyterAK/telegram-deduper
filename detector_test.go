@@ -6,6 +6,50 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+func TestDocumentMediaType(t *testing.T) {
+	cases := []struct {
+		mime string
+		want string
+	}{
+		{"video/mp4", MediaTypeVideo},
+		{"video/x-matroska", MediaTypeVideo},
+		{"image/png", MediaTypePhoto},
+		{"image/jpeg", MediaTypePhoto},
+		{"application/pdf", MediaTypeDocument},
+		{"application/zip", MediaTypeDocument},
+		{"", MediaTypeDocument},
+	}
+	for _, c := range cases {
+		if got := documentMediaType(&tgbotapi.Document{MimeType: c.mime}); got != c.want {
+			t.Errorf("documentMediaType(%q)=%q, want %q", c.mime, got, c.want)
+		}
+	}
+}
+
+func TestExtractContentDocumentAsFile(t *testing.T) {
+	chat := int64(-100123)
+	// a video delivered as a document ("send as file") must be
+	// classified as a video, so it matches stored videos
+	m := &tgbotapi.Message{
+		MessageID: 42,
+		Chat:      &tgbotapi.Chat{ID: chat, Type: "supergroup"},
+		From:      &tgbotapi.User{ID: 7, FirstName: "Иван"},
+		Document: &tgbotapi.Document{
+			FileID:       "doc-file-id",
+			FileUniqueID: "doc-uid-42",
+			FileName:     "clip.mp4",
+			MimeType:     "video/mp4",
+		},
+	}
+	c := extractContent(m, chat)
+	if c.MediaType != MediaTypeVideo {
+		t.Fatalf("video sent as file must be classified as video, got %q", c.MediaType)
+	}
+	if c.MediaUID == "" {
+		t.Fatal("document file_unique_id must be extracted")
+	}
+}
+
 func TestClassify(t *testing.T) {
 	cases := []struct {
 		hasURL, fwd  bool

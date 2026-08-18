@@ -158,17 +158,28 @@ func (d *Detector) thumbHash(ps *tgbotapi.PhotoSize) (string, error) {
 }
 
 // mediaHash returns the perceptual hash for a media message:
-// the photo itself, or the thumbnail for videos and documents.
-// Returns ("", nil) for media without a hashable preview.
+// the photo itself, or the thumbnail for videos and documents
+// (including images/videos that arrived as documents via
+// "send as file"). Returns ("", nil) for media without a
+// hashable preview.
 func (d *Detector) mediaHash(m *tgbotapi.Message, mediaType string) (string, error) {
 	switch mediaType {
 	case MediaTypePhoto:
-		return d.photoHash(m)
-	case MediaTypeVideo:
-		if m.Video == nil {
-			return "", fmt.Errorf("no video")
+		if len(m.Photo) > 0 {
+			return d.photoHash(m)
 		}
-		return d.thumbHash(m.Video.Thumbnail)
+		if m.Document != nil {
+			return d.thumbHash(m.Document.Thumbnail) // image sent as a file
+		}
+		return "", fmt.Errorf("no photo")
+	case MediaTypeVideo:
+		if m.Video != nil {
+			return d.thumbHash(m.Video.Thumbnail)
+		}
+		if m.Document != nil {
+			return d.thumbHash(m.Document.Thumbnail) // video sent as a file
+		}
+		return "", fmt.Errorf("no video")
 	case MediaTypeDocument:
 		if m.Document == nil {
 			return "", fmt.Errorf("no document")
