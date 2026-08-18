@@ -156,12 +156,20 @@ func deletedOriginalLabel(p string) string {
 	return "строгая"
 }
 
+func reactToOldLabel(b bool) string {
+	if b {
+		return "реагировать"
+	}
+	return "не реагировать"
+}
+
 func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
 	text := "Настройки Антидубля\n\n" +
 		"Период слежения: " + strconv.Itoa(s.RetentionDays) + " сут — повтор сообщения\n" +
 		"в течение этого срока считается дублем.\n" +
 		"Картинки: " + photoModeLabel(s.PhotoMode) + "\n" +
 		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
+		"Старые сообщения (после простоя): " + reactToOldLabel(s.ReactToOld) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -187,6 +195,11 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("Удалённый оригинал: "+deletedOriginalLabel(s.DeletedOriginalPolicy), "delpol:view"),
 			btn("Пропускать", "delpol:"+DeletedOriginalAllow),
 			btn("Строгая", "delpol:"+DeletedOriginalStrict),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Старые сообщения: "+reactToOldLabel(s.ReactToOld), "old:view"),
+			btn("Не реагировать", "old:no"),
+			btn("Реагировать", "old:yes"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Автоудаление: "+autoDeleteLabel(s.AutoDeleteHours), "ad:view"),
@@ -331,6 +344,17 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		case "-1":
 			s.AutoDeleteHours = clamp(s.AutoDeleteHours-1, 0, maxAuto)
 			changed = true
+		}
+	case "old":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case "no":
+				s.ReactToOld = false
+				changed = true
+			case "yes":
+				s.ReactToOld = true
+				changed = true
+			}
 		}
 	case "delpol":
 		if len(parts) == 2 {

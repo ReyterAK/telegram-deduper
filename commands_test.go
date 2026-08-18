@@ -138,6 +138,38 @@ func TestRouteMenuWarningsCategories(t *testing.T) {
 
 // Per-chat settings: initialized from global defaults, independent
 // between chats, persisted to the store.
+func TestShouldReact(t *testing.T) {
+	now := int64(1000000)
+	s := &Settings{}
+
+	// fresh message → react
+	if !shouldReact(s, now-10, now) {
+		t.Fatal("fresh message must react")
+	}
+	// within the freshness window (5 min) → react
+	if !shouldReact(s, now-299, now) {
+		t.Fatal("message inside the window must react")
+	}
+	// older than the window → no reaction
+	if shouldReact(s, now-301, now) {
+		t.Fatal("message outside the window must not react")
+	}
+	// react_to_old=true overrides everything
+	s.ReactToOld = true
+	if !shouldReact(s, now-100000, now) {
+		t.Fatal("react_to_old must force reactions")
+	}
+}
+
+func TestReactToOldLabel(t *testing.T) {
+	if got := reactToOldLabel(false); got != "не реагировать" {
+		t.Fatalf("false = %q", got)
+	}
+	if got := reactToOldLabel(true); got != "реагировать" {
+		t.Fatalf("true = %q", got)
+	}
+}
+
 func TestPerChatSettings(t *testing.T) {
 	st := newTestStore(t)
 	d := NewDetector(DefaultConfig(), st, nil, "")

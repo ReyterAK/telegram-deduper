@@ -235,6 +235,20 @@ func classify(hasURL, forwardExternal bool) DupType {
 	return DupTypeMessage
 }
 
+// FreshnessWindowSec is how old a message may be (by send time) for
+// the bot to react to it. Older messages (backlog after downtime)
+// are remembered but not acted upon, unless react_to_old is set.
+const FreshnessWindowSec = 5 * 60
+
+// shouldReact reports whether a message deserves a reaction, based
+// on its send time and the react_to_old policy.
+func shouldReact(s *Settings, msgDate, now int64) bool {
+	if s.ReactToOld {
+		return true
+	}
+	return now-msgDate <= FreshnessWindowSec
+}
+
 // Process handles one incoming message: store, detect, react.
 func (d *Detector) Process(m *tgbotapi.Message) {
 	// Only group/supergroup messages from identifiable users.
@@ -262,6 +276,25 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	}
 
 	now := time.Now()
+	ts := int64(m.Date) // the message's real send time
+	if ts <= 0 {
+		ts = now.Unix()
+	}
+
+	// Backlog after downtime (bot offline, Telegram delivered the
+	// missed updates late): remember the content with its real time,
+	// but do not react — no retroactive deletions/notices/warnings.
+	if !shouldReact(s, ts, now.Unix()) {
+		if s.PhotoMode == PhotoModePerceptual && c.MediaUID != "" && len(m.Photo) > 0 {
+			if ph, err := d.photoHash(m); err == nil {
+				c.PhotoHash = ph
+			}
+		}
+		d.store(c, ts)
+		log.Printf("[detect] сообщение %d от %s старше порога свежести — только запомнено", c.MsgID, time.Unix(ts, 0).Format("15:04:05"))
+		return
+	}
+
 	window := now.Add(-time.Duration(s.RetentionDays) * 24 * time.Hour).Unix()
 
 	// The first occurrence of any content (including the first
@@ -293,7 +326,7 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 		}
 	}
 
-	d.store(c, now.Unix())
+	d.store(c, ts)
 
 	if len(dups) == 0 {
 		return

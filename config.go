@@ -86,6 +86,11 @@ type Config struct {
 	// "strict" — flagged content stays flagged for the window: the
 	// repeat is deleted anyway.
 	DeletedOriginalPolicy string `json:"deleted_original_policy"`
+	// ReactToOld: react to messages older than the freshness window
+	// (e.g. a backlog after the bot was offline). When false (default),
+	// old messages are remembered but not reacted to — no retroactive
+	// deletions, notices or warnings.
+	ReactToOld bool `json:"react_to_old"`
 }
 
 // Settings is the tunable subset of the config, stored per chat
@@ -98,6 +103,7 @@ type Settings struct {
 	AutoDeleteHours       int        `json:"auto_delete_hours"`
 	PhotoMode             string     `json:"photo_mode"`
 	DeletedOriginalPolicy string     `json:"deleted_original_policy"`
+	ReactToOld            bool       `json:"react_to_old"`
 }
 
 // asSettings returns the tunable subset of the global config —
@@ -110,6 +116,7 @@ func (c *Config) asSettings() *Settings {
 		AutoDeleteHours:       c.AutoDeleteHours,
 		PhotoMode:             c.PhotoMode,
 		DeletedOriginalPolicy: c.DeletedOriginalPolicy,
+		ReactToOld:            c.ReactToOld,
 	}
 }
 
