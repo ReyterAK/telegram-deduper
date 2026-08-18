@@ -48,10 +48,9 @@ func (d *Detector) purgeBotMessages() {
 }
 
 // autoDeleteLoop runs the periodic purge while ctx is active.
+// The enabled/disabled state is read per tick so the settings
+// menu can toggle auto-delete live.
 func (d *Detector) autoDeleteLoop(ctx context.Context) {
-	if d.cfg.AutoDeleteHours <= 0 {
-		return
-	}
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
 	for {
@@ -59,7 +58,9 @@ func (d *Detector) autoDeleteLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			d.purgeBotMessages()
+			if d.cfg.AutoDeleteHours > 0 {
+				d.purgeBotMessages()
+			}
 		}
 	}
 }

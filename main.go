@@ -67,6 +67,11 @@ func main() {
 		log.Printf("[boot] очистка: %v", err)
 	}
 
+	// Expose the command menu in Telegram.
+	_, _ = bot.MakeRequest("setMyCommands", tgbotapi.Params{
+		"commands": `[{"command":"settings","description":"Настройки бота"},{"command":"status","description":"Состояние бота"},{"command":"help","description":"Справка"}]`,
+	})
+
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
@@ -90,10 +95,17 @@ func main() {
 				return
 			}
 			if update.Message != nil {
-				det.Process(update.Message)
+				if update.Message.IsCommand() {
+					det.HandleCommand(update.Message)
+				} else {
+					det.Process(update.Message)
+				}
 			}
 			if update.EditedMessage != nil {
 				det.ProcessEdited(update.EditedMessage)
+			}
+			if update.CallbackQuery != nil {
+				det.HandleCallback(update.CallbackQuery)
 			}
 		}
 	}

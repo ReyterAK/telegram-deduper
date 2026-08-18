@@ -20,6 +20,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -185,6 +186,21 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 		log.Printf("[detect] chat_id не задан, зафиксирован чат %d", chatID)
 	}
 	if chatID != d.chatID {
+		// The bot is locked to one chat; other chats are ignored.
+		// Notify the owner once per foreign chat for visibility.
+		if !foreignChats[chatID] {
+			foreignChats[chatID] = true
+			name := m.Chat.Title
+			if name == "" {
+				name = strconv.FormatInt(chatID, 10)
+			}
+			log.Printf("[detect] бота добавили в чужой чат %q (%d) — игнорируется", name, chatID)
+			_, err := d.bot.Send(tgbotapi.NewMessage(d.chatID,
+				fmt.Sprintf("Бота добавили в чужой чат «%s» (id %d).\nБот его игнорирует.", name, chatID)))
+			if err != nil {
+				log.Printf("[detect] уведомление о чужом чате: %v", err)
+			}
+		}
 		return
 	}
 
