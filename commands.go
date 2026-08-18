@@ -63,6 +63,12 @@ func (d *Detector) HandleCommand(m *tgbotapi.Message) {
 		d.showSettingsMenu(m)
 	case "status":
 		d.showStatus(m)
+	case "chats":
+		d.showChats(m)
+	case "allow":
+		d.allowChat(m)
+	case "deny":
+		d.denyChat(m)
 	default:
 		d.showHelp(m)
 	}
@@ -131,7 +137,8 @@ func helpText() string {
 		"КОМАНДЫ\n" +
 		"/settings — настройки этого чата (только админы)\n" +
 		"/status — состояние бота\n" +
-		"/help — эта справка\n\n" +
+		"/help — эта справка\n" +
+		"Владелец: /chats — список разрешённых чатов, /allow <id> — разрешить, /deny <id> — запретить.\n\n" +
 		"НАСТРОЙКИ КАЖДОГО ЧАТА НЕЗАВИСИМЫ."
 }
 

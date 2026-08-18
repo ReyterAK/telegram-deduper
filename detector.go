@@ -66,6 +66,8 @@ type Detector struct {
 	pending   map[int64]pendingInput
 	// foreignNotified remembers chats that were reported to the owner.
 	foreignNotified map[int64]bool
+	// chatTitleCache caches chat titles for the /chats listing.
+	chatTitleCache map[int64]string
 }
 
 // pendingInput remembers a text-value request until the user replies.
@@ -87,6 +89,7 @@ func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string
 		chatAdmin:       map[int64]bool{},
 		pending:         map[int64]pendingInput{},
 		foreignNotified: map[int64]bool{},
+		chatTitleCache:  map[int64]string{},
 	}
 }
 
@@ -104,8 +107,10 @@ func (d *Detector) isAllowed(chatID int64) bool {
 	return false
 }
 
-// notifyForeign tells the owner (first allowed chat) once per foreign
-// chat that the bot was added there but is not enabled.
+// notifyForeign tells the owner once per foreign chat that the bot
+// was added there but is not enabled. Notification goes to the
+// owner's private chat with the bot (or the first allowed chat when
+// no owner is configured).
 func (d *Detector) notifyForeign(chatID int64, title string) {
 	if d.foreignNotified[chatID] {
 		return
@@ -116,13 +121,20 @@ func (d *Detector) notifyForeign(chatID int64, title string) {
 		name = strconv.FormatInt(chatID, 10)
 	}
 	log.Printf("[chat] бота добавили в чат %q (%d) — не в списке разрешённых, игнорируется", name, chatID)
-	if len(d.cfg.AllowedChats) > 0 {
-		target := d.cfg.AllowedChats[0]
-		_, err := d.bot.Send(tgbotapi.NewMessage(target,
-			fmt.Sprintf("Бота добавили в чат «%s» (id %d).\nРазрешить: добавить %d в allowed_chats.", name, chatID, chatID)))
-		if err != nil {
-			log.Printf("[chat] уведомление владельцу: %v", err)
-		}
+
+	var target int64
+	if d.cfg.OwnerUserID != 0 {
+		target = d.cfg.OwnerUserID
+	} else if len(d.cfg.AllowedChats) > 0 {
+		target = d.cfg.AllowedChats[0]
+	}
+	if target == 0 {
+		return
+	}
+	_, err := d.bot.Send(tgbotapi.NewMessage(target,
+		fmt.Sprintf("Бота добавили в чат «%s» (id %d).\nРазрешить: /allow %d", name, chatID, chatID)))
+	if err != nil {
+		log.Printf("[chat] уведомление владельцу: %v", err)
 	}
 }
 

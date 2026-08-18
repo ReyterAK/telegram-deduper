@@ -92,8 +92,13 @@ type Config struct {
 	FreshnessMinutes int `json:"freshness_minutes"`
 	// AllowedChats: chat ids the bot may serve. Empty = any chat
 	// where the bot is an administrator. When non-empty, other chats
-	// are ignored and the owner is notified in the first allowed chat.
+	// are ignored and the owner is notified.
 	AllowedChats []int64 `json:"allowed_chats"`
+	// OwnerUserID: Telegram user id of the owner. The owner manages
+	// the allowlist via /chats, /allow and /deny (private chat with
+	// the bot or any allowed chat); foreign-add notifications are
+	// sent to this user. 0 = owner commands disabled.
+	OwnerUserID int64 `json:"owner_user_id"`
 }
 
 // Freshness bounds.

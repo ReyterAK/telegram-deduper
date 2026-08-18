@@ -225,6 +225,25 @@ func TestIsAllowed(t *testing.T) {
 	}
 }
 
+func TestIsOwner(t *testing.T) {
+	cfg := DefaultConfig()
+	d := &Detector{cfg: cfg}
+
+	// unset owner → nobody is owner
+	if d.isOwner(1) {
+		t.Fatal("no owner configured, must not pass")
+	}
+
+	cfg.OwnerUserID = 873242843
+	d = &Detector{cfg: cfg}
+	if !d.isOwner(873242843) {
+		t.Fatal("configured owner must pass")
+	}
+	if d.isOwner(1) {
+		t.Fatal("other user must not be owner")
+	}
+}
+
 func TestPerChatSettings(t *testing.T) {
 	st := newTestStore(t)
 	d := NewDetector(DefaultConfig(), st, nil, "")
