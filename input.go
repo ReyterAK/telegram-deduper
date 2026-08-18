@@ -26,6 +26,8 @@ type numericField struct {
 	min   func(s *Settings) int
 	max   func(s *Settings) int
 	set   func(s *Settings, v int)
+	// value formats the current value (for confirmations).
+	value func(s *Settings) string
 }
 
 var numericFields = []numericField{
@@ -35,6 +37,7 @@ var numericFields = []numericField{
 		min:   func(s *Settings) int { return MinRetentionDays },
 		max:   func(s *Settings) int { return MaxRetentionDays },
 		set:   func(s *Settings, v int) { s.RetentionDays = v },
+		value: func(s *Settings) string { return strconv.Itoa(s.RetentionDays) + " сут" },
 	},
 	{
 		id:    "freshness",
@@ -42,6 +45,7 @@ var numericFields = []numericField{
 		min:   func(s *Settings) int { return 0 },
 		max:   func(s *Settings) int { return MaxFreshnessMinutes },
 		set:   func(s *Settings, v int) { s.FreshnessMinutes = v },
+		value: func(s *Settings) string { return freshnessLabel(s.FreshnessMinutes) },
 	},
 	{
 		id:    "autodel",
@@ -49,6 +53,7 @@ var numericFields = []numericField{
 		min:   func(s *Settings) int { return 0 },
 		max:   func(s *Settings) int { return s.RetentionDays * 24 },
 		set:   func(s *Settings, v int) { s.AutoDeleteHours = v },
+		value: func(s *Settings) string { return autoDeleteLabel(s.AutoDeleteHours) },
 	},
 }
 
@@ -67,6 +72,7 @@ func warnFields(cat DupCategory) []numericField {
 			set: func(s *Settings, v int) {
 				warningSettingsPtr(s, cat).Threshold = v
 			},
+			value: func(s *Settings) string { return thresholdLabel(warningSettingsPtr(s, cat).Threshold) },
 		},
 		{
 			id:    prefix + ":life",
@@ -76,6 +82,7 @@ func warnFields(cat DupCategory) []numericField {
 			set: func(s *Settings, v int) {
 				warningSettingsPtr(s, cat).LifetimeDays = v
 			},
+			value: func(s *Settings) string { return strconv.Itoa(warningSettingsPtr(s, cat).LifetimeDays) + " сут" },
 		},
 		{
 			id:    prefix + ":days",
@@ -85,6 +92,7 @@ func warnFields(cat DupCategory) []numericField {
 			set: func(s *Settings, v int) {
 				warningSettingsPtr(s, cat).BanDays = v
 			},
+			value: func(s *Settings) string { return strconv.Itoa(warningSettingsPtr(s, cat).BanDays) + " сут" },
 		},
 	}
 }
@@ -172,7 +180,7 @@ func (d *Detector) HandleTextInput(m *tgbotapi.Message) bool {
 	d.persistSettings(chatID, s)
 
 	f := findNumericField(p.field)
-	_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Готово: %s", f.label)))
+	_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Готово: %s = %s", f.label, f.value(s))))
 
 	// refresh the open menu with the new value
 	text, kb := d.routeMenu(menuPartsForField(p.field), s)
