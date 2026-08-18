@@ -18,9 +18,9 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,13 +49,19 @@ type MsgContent struct {
 }
 
 // Detector wires store + telegram into the duplicate pipeline.
+// Multi-chat: settings are resolved per chat (initialized from the
+// global config), and the bot engages only chats where it is an
+// administrator. All update handling runs in the single poller
+// goroutine, so the caches need no locking.
 type Detector struct {
-	cfg          *Config
-	st           *Store
-	bot          *tgbotapi.BotAPI
-	configPath   string
-	chatID       int64
-	chatUsername string
+	cfg        *Config
+	st         *Store
+	bot        *tgbotapi.BotAPI
+	configPath string
+
+	settings map[int64]*Settings
+	chatName map[int64]string
+	chatAdmin map[int64]bool
 }
 
 func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string) *Detector {
@@ -64,8 +70,72 @@ func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string
 		st:         st,
 		bot:        bot,
 		configPath: configPath,
-		chatID:     cfg.ChatID,
+		settings:   map[int64]*Settings{},
+		chatName:   map[int64]string{},
+		chatAdmin:  map[int64]bool{},
 	}
+}
+
+// settingsFor returns the effective settings of a chat, initializing
+// them from the global config on first contact and persisting them.
+func (d *Detector) settingsFor(chatID int64) *Settings {
+	if s, ok := d.settings[chatID]; ok {
+		return s
+	}
+	s := d.cfg.asSettings()
+	if raw, err := d.st.GetChatSettings(chatID); err == nil && raw != "" {
+		if err := json.Unmarshal([]byte(raw), s); err != nil {
+			log.Printf("[chat] чтение настроек чата %d: %v", chatID, err)
+		}
+	} else if err == nil {
+		// first contact — persist the defaults
+		d.persistSettings(chatID, s)
+	}
+	d.settings[chatID] = s
+	return s
+}
+
+func (d *Detector) persistSettings(chatID int64, s *Settings) {
+	raw, err := json.Marshal(s)
+	if err != nil {
+		log.Printf("[chat] сериализация настроек: %v", err)
+		return
+	}
+	if err := d.st.SaveChatSettings(chatID, string(raw)); err != nil {
+		log.Printf("[chat] сохранение настроек чата %d: %v", chatID, err)
+	}
+}
+
+// botAdmin reports whether the bot itself is an administrator (or
+// creator) of the chat — required for deletions and bans.
+func (d *Detector) botAdmin(chatID int64) bool {
+	if v, ok := d.chatAdmin[chatID]; ok {
+		return v
+	}
+	member, err := d.bot.GetChatMember(tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{ChatID: chatID, UserID: d.bot.Self.ID},
+	})
+	ok := err == nil && (member.IsAdministrator() || member.IsCreator())
+	d.chatAdmin[chatID] = ok
+	if !ok {
+		log.Printf("[chat] бот не админ чата %d, сообщения игнорируются", chatID)
+	}
+	return ok
+}
+
+// chatNameFor returns the cached username of a chat (for message links).
+func (d *Detector) chatNameFor(chatID int64) string {
+	if n, ok := d.chatName[chatID]; ok {
+		return n
+	}
+	name := ""
+	if chat, err := d.bot.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: chatID}}); err == nil {
+		name = chat.UserName
+	} else {
+		log.Printf("[chat] имя чата %d: %v", chatID, err)
+	}
+	d.chatName[chatID] = name
+	return name
 }
 
 // extractContent builds the comparable content of a message.
@@ -180,32 +250,11 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 
 	chatID := m.Chat.ID
 
-	// Auto-lock to the first group seen when chat_id is not set.
-	if d.chatID == 0 {
-		d.chatID = chatID
-		if err := d.cfg.SaveChatID(d.configPath, chatID); err != nil {
-			log.Printf("[detect] не удалось сохранить chat_id=%d: %v", chatID, err)
-		}
-		log.Printf("[detect] chat_id не задан, зафиксирован чат %d", chatID)
-	}
-	if chatID != d.chatID {
-		// The bot is locked to one chat; other chats are ignored.
-		// Notify the owner once per foreign chat for visibility.
-		if !foreignChats[chatID] {
-			foreignChats[chatID] = true
-			name := m.Chat.Title
-			if name == "" {
-				name = strconv.FormatInt(chatID, 10)
-			}
-			log.Printf("[detect] бота добавили в чужой чат %q (%d) — игнорируется", name, chatID)
-			_, err := d.bot.Send(tgbotapi.NewMessage(d.chatID,
-				fmt.Sprintf("Бота добавили в чужой чат «%s» (id %d).\nБот его игнорирует.", name, chatID)))
-			if err != nil {
-				log.Printf("[detect] уведомление о чужом чате: %v", err)
-			}
-		}
+	// Engage only chats where the bot is an administrator.
+	if !d.botAdmin(chatID) {
 		return
 	}
+	s := d.settingsFor(chatID)
 
 	c := extractContent(m, chatID)
 	if c.NormText == "" && c.MediaUID == "" && c.FwdSource == "" {
@@ -213,7 +262,7 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	}
 
 	now := time.Now()
-	window := now.Add(-time.Duration(d.cfg.RetentionDays) * 24 * time.Hour).Unix()
+	window := now.Add(-time.Duration(s.RetentionDays) * 24 * time.Hour).Unix()
 
 	// The first occurrence of any content (including the first
 	// forward from an external source) is NOT a duplicate — only
@@ -227,7 +276,7 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	// Perceptual photo match: when the exact file match found
 	// nothing and photo comparison by content is enabled, download
 	// the image and compare its dHash against the window.
-	if len(dups) == 0 && d.cfg.PhotoMode == PhotoModePerceptual &&
+	if len(dups) == 0 && s.PhotoMode == PhotoModePerceptual &&
 		c.MediaUID != "" && len(m.Photo) > 0 {
 		if ph, err := d.photoHash(m); err != nil {
 			log.Printf("[photo] хеш фотографии: %v", err)
@@ -257,7 +306,7 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 			break
 		}
 	}
-	d.react(c, classify(c.HasURL, c.ForwardExternal), cat, dups[0], now)
+	d.react(c, classify(c.HasURL, c.ForwardExternal), cat, dups[0], now, s)
 }
 
 // ProcessEdited refreshes the stored content of an edited message
@@ -269,7 +318,7 @@ func (d *Detector) ProcessEdited(m *tgbotapi.Message) {
 		return
 	}
 	chatID := m.Chat.ID
-	if chatID != d.chatID {
+	if !d.botAdmin(chatID) {
 		return
 	}
 	c := extractContent(m, chatID)

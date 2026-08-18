@@ -26,17 +26,17 @@ import (
 // express explicit false because of bool+omitempty).
 const readOnlyPermissions = `{"can_send_messages":false,"can_send_media_messages":false,"can_send_polls":false,"can_send_other_messages":false,"can_add_web_page_previews":false}`
 
-func (d *Detector) warningSettingsFor(cat DupCategory) WarningSettings {
+func warningSettingsFor(s *Settings, cat DupCategory) WarningSettings {
 	if cat == CatSameParticipant {
-		return d.cfg.Warnings.SameParticipant
+		return s.Warnings.SameParticipant
 	}
-	return d.cfg.Warnings.DiffParticipant
+	return s.Warnings.DiffParticipant
 }
 
 // warnAndMaybeBan records a warning event and bans when the
 // threshold is reached. authorName is shown in the ban notice.
-func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now time.Time, authorName string) {
-	ws := d.warningSettingsFor(cat)
+func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now time.Time, authorName string, s *Settings) {
+	ws := warningSettingsFor(s, cat)
 	if ws.Threshold <= 0 {
 		return
 	}
@@ -83,7 +83,7 @@ func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now ti
 		}
 		notice := fmt.Sprintf("Не удалось применить бан для %s: %v", name, err2)
 		if sent, err := d.bot.Send(tgbotapi.NewMessage(chatID, notice)); err == nil {
-			d.scheduleAutoDelete(sent)
+			d.scheduleAutoDelete(sent, s.AutoDeleteHours)
 		}
 		if err := d.st.ResetWarnings(chatID, userID); err != nil {
 			log.Printf("[warn] сброс предупреждений после ошибки бана: %v", err)
@@ -109,7 +109,7 @@ func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now ti
 		log.Printf("[warn] уведомление о бане: %v", err)
 		return
 	}
-	d.scheduleAutoDelete(sent)
+	d.scheduleAutoDelete(sent, s.AutoDeleteHours)
 }
 
 func banTypeLabel(banType string) string {

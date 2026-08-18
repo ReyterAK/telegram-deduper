@@ -19,11 +19,11 @@ import (
 )
 
 // scheduleAutoDelete registers a bot message for deletion.
-func (d *Detector) scheduleAutoDelete(sent tgbotapi.Message) {
-	if d.cfg.AutoDeleteHours <= 0 {
+func (d *Detector) scheduleAutoDelete(sent tgbotapi.Message, hours int) {
+	if hours <= 0 {
 		return
 	}
-	deleteAt := time.Now().Add(time.Duration(d.cfg.AutoDeleteHours) * time.Hour).Unix()
+	deleteAt := time.Now().Add(time.Duration(hours) * time.Hour).Unix()
 	if err := d.st.AddBotMessage(sent.Chat.ID, sent.MessageID, deleteAt); err != nil {
 		log.Printf("[autodel] регистрация удаления: %v", err)
 	}
@@ -48,8 +48,8 @@ func (d *Detector) purgeBotMessages() {
 }
 
 // autoDeleteLoop runs the periodic purge while ctx is active.
-// The enabled/disabled state is read per tick so the settings
-// menu can toggle auto-delete live.
+// Each bot message carries its own delete_at (per-chat hours were
+// baked in at scheduling), so the purge always runs.
 func (d *Detector) autoDeleteLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	defer ticker.Stop()
@@ -58,9 +58,7 @@ func (d *Detector) autoDeleteLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if d.cfg.AutoDeleteHours > 0 {
-				d.purgeBotMessages()
-			}
+			d.purgeBotMessages()
 		}
 	}
 }

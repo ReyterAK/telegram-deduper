@@ -53,17 +53,8 @@ func main() {
 
 	det := NewDetector(cfg, st, bot, configPath)
 
-	// Chat username cache for message links.
-	if cfg.ChatID != 0 {
-		if chat, err := bot.GetChat(tgbotapi.ChatInfoConfig{ChatConfig: tgbotapi.ChatConfig{ChatID: cfg.ChatID}}); err == nil {
-			det.chatUsername = chat.UserName
-		} else {
-			log.Printf("[boot] получение имени чата: %v", err)
-		}
-	}
-
 	// Initial retention sweep, then hourly.
-	if err := st.CleanupRetention(cfg.ChatID, cfg.RetentionDays); err != nil {
+	if err := st.CleanupAll(cfg.RetentionDays); err != nil {
 		log.Printf("[boot] очистка: %v", err)
 	}
 
@@ -82,7 +73,7 @@ func main() {
 	u.Timeout = 50
 	updates := bot.GetUpdatesChan(u)
 
-	log.Printf("[boot] Antidubl запущен (чат %d, окно %d суток)", cfg.ChatID, cfg.RetentionDays)
+	log.Printf("[boot] Antidubl запущен (окно по умолчанию %d суток, %d чатов в базе)", cfg.RetentionDays, chatCount(st))
 
 	for {
 		select {
@@ -111,7 +102,7 @@ func main() {
 	}
 }
 
-// retentionLoop sweeps old rows hourly.
+// retentionLoop sweeps old rows hourly (all chats).
 func retentionLoop(ctx context.Context, st *Store, cfg *Config) {
 	ticker := time.NewTicker(time.Hour)
 	defer ticker.Stop()
@@ -120,9 +111,18 @@ func retentionLoop(ctx context.Context, st *Store, cfg *Config) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := st.CleanupRetention(cfg.ChatID, cfg.RetentionDays); err != nil {
+			if err := st.CleanupAll(cfg.RetentionDays); err != nil {
 				log.Printf("[retention] очистка: %v", err)
 			}
 		}
 	}
+}
+
+// chatCount returns the number of known chats (informational).
+func chatCount(st *Store) int {
+	chats, err := st.KnownChats()
+	if err != nil {
+		return 0
+	}
+	return len(chats)
 }

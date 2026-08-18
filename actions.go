@@ -59,12 +59,12 @@ func chatMessageLink(chatID int64, username string, msgID int) string {
 }
 
 // reactionFor resolves the configured reaction for type×category.
-func (d *Detector) reactionFor(typ DupType, cat DupCategory) Reaction {
+func reactionFor(s *Settings, typ DupType, cat DupCategory) Reaction {
 	var rs ReactionSettings
 	if typ == DupTypeLink {
-		rs = d.cfg.Reactions.Link
+		rs = s.Reactions.Link
 	} else {
-		rs = d.cfg.Reactions.Message
+		rs = s.Reactions.Message
 	}
 	if cat == CatSameParticipant {
 		return rs.SameParticipant
@@ -82,9 +82,9 @@ func withAuthor(text, name string) string {
 
 // react executes the configured reaction for a detected duplicate.
 // original is the first occurrence (empty for external forwards).
-func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original StoredMessage, now time.Time) {
-	reaction := d.reactionFor(typ, cat)
-	link := messageLink(c.ChatID, c.MsgID, d.chatUsername)
+func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original StoredMessage, now time.Time, s *Settings) {
+	reaction := reactionFor(s, typ, cat)
+	link := messageLink(c.ChatID, c.MsgID, d.chatNameFor(c.ChatID))
 
 	switch reaction {
 	case ReactionIgnore:
@@ -92,7 +92,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 
 	case ReactionComment:
 		text := withAuthor(fmt.Sprintf(commentTemplate(typ), link), c.AuthorName)
-		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
+		text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
 		msg := tgbotapi.NewMessage(c.ChatID, text)
 		msg.ReplyToMessageID = c.MsgID
 		sent, err := d.bot.Send(msg)
@@ -100,11 +100,11 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 			log.Printf("[action] комментарий: %v", err)
 			return
 		}
-		d.scheduleAutoDelete(sent)
+		d.scheduleAutoDelete(sent, s.AutoDeleteHours)
 
 	case ReactionDelete:
 		text := withAuthor(deletedShortText(typ), c.AuthorName)
-		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
+		text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
 
 		// 1) Post the notice as a REPLY to the original first: the
 		// quoted content shows which message was duplicated.
@@ -114,7 +114,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 		if err != nil {
 			// Original is gone (message to be replied not found) or a
 			// transient error. Policy decides whether the repeat stands.
-			if d.cfg.DeletedOriginalPolicy != DeletedOriginalStrict {
+			if s.DeletedOriginalPolicy != DeletedOriginalStrict {
 				log.Printf("[action] ответ на оригинал не прошёл (%v) — повтор разрешён (allow)", err)
 				return
 			}
@@ -125,12 +125,12 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 			}
 			// Standalone notice without a reply (no dead link).
 			if s2, err2 := d.bot.Send(tgbotapi.NewMessage(c.ChatID, text)); err2 == nil {
-				d.scheduleAutoDelete(s2)
+				d.scheduleAutoDelete(s2, s.AutoDeleteHours)
 			}
-			d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now, c.AuthorName)
+			warnAndMaybeBan(d, c.ChatID, c.UserID, cat, now, c.AuthorName, s)
 			return
 		}
-		d.scheduleAutoDelete(sent)
+		d.scheduleAutoDelete(sent, s.AutoDeleteHours)
 
 		// 2) Delete the duplicate.
 		if _, err := d.bot.Request(tgbotapi.NewDeleteMessage(c.ChatID, c.MsgID)); err != nil {
@@ -140,7 +140,7 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 	}
 
 	// Warning accounting happens for comment/delete reactions only.
-	d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now, c.AuthorName)
+	warnAndMaybeBan(d, c.ChatID, c.UserID, cat, now, c.AuthorName, s)
 }
 
 // deletedShortText is the reply-form delete notice (no link — the
@@ -154,13 +154,13 @@ func deletedShortText(typ DupType) string {
 
 // appendWarningLine appends the current warning count when warnings
 // are enabled for the category.
-func (d *Detector) appendWarningLine(base string, chatID, userID int64, cat DupCategory, now time.Time) string {
-	ws := d.warningSettingsFor(cat)
+func appendWarningLine(st *Store, s *Settings, base string, chatID, userID int64, cat DupCategory, now time.Time) string {
+	ws := warningSettingsFor(s, cat)
 	if ws.Threshold <= 0 {
 		return base
 	}
 	lifetimeSec := int64(ws.LifetimeDays) * 86400
-	count, err := d.st.CountWarnings(chatID, userID, now.Unix()-lifetimeSec)
+	count, err := st.CountWarnings(chatID, userID, now.Unix()-lifetimeSec)
 	if err != nil {
 		log.Printf("[action] подсчёт предупреждений: %v", err)
 		return base

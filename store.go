@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS bot_messages (
 	PRIMARY KEY (chat_id, msg_id)
 );
 CREATE INDEX IF NOT EXISTS idx_bot_messages_due ON bot_messages(delete_at);
+
+CREATE TABLE IF NOT EXISTS chat_settings (
+	chat_id INTEGER PRIMARY KEY,
+	settings_json TEXT NOT NULL DEFAULT '{}'
+);
 `
 
 func OpenStore(path string) (*Store, error) {
@@ -242,6 +247,62 @@ func (s *Store) CleanupRetention(chatID int64, retentionDays int) error {
 		return err
 	}
 	if _, err := s.db.Exec(`DELETE FROM warnings WHERE chat_id = ? AND ts < ?`, chatID, cutoff); err != nil {
+		return err
+	}
+	// housekeeping: remove already-purged bot rows
+	_, err := s.db.Exec(`DELETE FROM bot_messages WHERE delete_at < ?`, nowUnix())
+	return err
+}
+
+// ---------------------------------------------------------------------
+// per-chat settings
+// ---------------------------------------------------------------------
+
+// GetChatSettings returns the stored JSON for a chat ("" when unset).
+func (s *Store) GetChatSettings(chatID int64) (string, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT settings_json FROM chat_settings WHERE chat_id = ?`, chatID).Scan(&raw)
+	if err == sql.ErrNoRows {
+		return "", nil
+	}
+	return raw, err
+}
+
+// SaveChatSettings persists the per-chat settings JSON.
+func (s *Store) SaveChatSettings(chatID int64, settingsJSON string) error {
+	_, err := s.db.Exec(
+		`INSERT INTO chat_settings (chat_id, settings_json) VALUES (?, ?)
+		 ON CONFLICT(chat_id) DO UPDATE SET settings_json = excluded.settings_json`,
+		chatID, settingsJSON)
+	return err
+}
+
+// KnownChats returns chat ids that have stored messages or settings.
+func (s *Store) KnownChats() ([]int64, error) {
+	rows, err := s.db.Query(`SELECT DISTINCT chat_id FROM messages UNION SELECT chat_id FROM chat_settings`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
+// CleanupAll deletes messages and warnings older than the retention
+// window across all chats.
+func (s *Store) CleanupAll(retentionDays int) error {
+	cutoff := nowUnix() - int64(retentionDays)*86400
+	if _, err := s.db.Exec(`DELETE FROM messages WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	if _, err := s.db.Exec(`DELETE FROM warnings WHERE ts < ?`, cutoff); err != nil {
 		return err
 	}
 	// housekeeping: remove already-purged bot rows

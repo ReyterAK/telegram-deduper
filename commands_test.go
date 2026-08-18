@@ -90,15 +90,16 @@ func TestApplyWarningChange(t *testing.T) {
 // Menu rendering must not panic and must carry the config values.
 func TestMenusRender(t *testing.T) {
 	d := &Detector{cfg: DefaultConfig()}
+	s := d.cfg.asSettings()
 
-	text, kb := d.mainMenu()
+	text, kb := d.mainMenu(s)
 	if text == "" || len(kb.InlineKeyboard) == 0 {
 		t.Fatal("main menu empty")
 	}
-	if _, kb := d.reactionsMenu(DupTypeLink); len(kb.InlineKeyboard) == 0 {
+	if _, kb := d.reactionsMenu(DupTypeLink, s); len(kb.InlineKeyboard) == 0 {
 		t.Fatal("reactions menu empty")
 	}
-	if _, kb := d.warningsMenu(CatSameParticipant); len(kb.InlineKeyboard) == 0 {
+	if _, kb := d.warningsMenu(CatSameParticipant, s); len(kb.InlineKeyboard) == 0 {
 		t.Fatal("warnings menu empty")
 	}
 }
@@ -107,30 +108,63 @@ func TestMenusRender(t *testing.T) {
 // (short keys "same"/"diff" used to map onto "diff_participant").
 func TestRouteMenuWarningsCategories(t *testing.T) {
 	d := &Detector{cfg: DefaultConfig()}
+	s := d.cfg.asSettings()
 
-	text, _ := d.routeMenu([]string{"m", "warn", string(CatSameParticipant)})
+	text, _ := d.routeMenu([]string{"m", "warn", string(CatSameParticipant)}, s)
 	if !contains(text, "одного участника") {
 		t.Fatalf("same menu title wrong: %q", text)
 	}
-	text, _ = d.routeMenu([]string{"m", "warn", string(CatDiffParticipant)})
+	text, _ = d.routeMenu([]string{"m", "warn", string(CatDiffParticipant)}, s)
 	if !contains(text, "разных участников") {
 		t.Fatalf("diff menu title wrong: %q", text)
 	}
 
 	// reactions navigation
-	text, _ = d.routeMenu([]string{"m", "react", "link"})
+	text, _ = d.routeMenu([]string{"m", "react", "link"}, s)
 	if !contains(text, "ссылки") {
 		t.Fatalf("link reactions menu title wrong: %q", text)
 	}
-	text, _ = d.routeMenu([]string{"m", "react", "message"})
+	text, _ = d.routeMenu([]string{"m", "react", "message"}, s)
 	if !contains(text, "сообщения") {
 		t.Fatalf("message reactions menu title wrong: %q", text)
 	}
 
 	// main menu on unknown data
-	text, _ = d.routeMenu([]string{"ret", "view"})
+	text, _ = d.routeMenu([]string{"ret", "view"}, s)
 	if !contains(text, "Период слежения") {
 		t.Fatalf("main menu lost: %q", text)
+	}
+}
+
+// Per-chat settings: initialized from global defaults, independent
+// between chats, persisted to the store.
+func TestPerChatSettings(t *testing.T) {
+	st := newTestStore(t)
+	d := NewDetector(DefaultConfig(), st, nil, "")
+
+	s1 := d.settingsFor(-1001)
+	s2 := d.settingsFor(-1002)
+	if s1 == s2 {
+		t.Fatal("chats must have independent settings")
+	}
+	if s1.RetentionDays != 10 || s2.RetentionDays != 10 {
+		t.Fatalf("defaults not applied: %d %d", s1.RetentionDays, s2.RetentionDays)
+	}
+
+	s1.RetentionDays = 3
+	if s2.RetentionDays != 10 {
+		t.Fatal("mutating chat1 must not affect chat2")
+	}
+	// the settings menu persists through persistSettings
+	d.persistSettings(-1001, s1)
+
+	// persistence: a fresh detector sees the stored value
+	d2 := NewDetector(DefaultConfig(), st, nil, "")
+	if got := d2.settingsFor(-1001).RetentionDays; got != 3 {
+		t.Fatalf("chat1 settings not persisted: %d", got)
+	}
+	if got := d2.settingsFor(-1002).RetentionDays; got != 10 {
+		t.Fatalf("chat2 defaults changed: %d", got)
 	}
 }
 

@@ -21,10 +21,7 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
-// foreignChats tracks chats (other than the locked one) where the
-// bot was added, so the owner is notified only once per chat.
-var foreignChats = map[int64]bool{}
-
+// HandleCommand routes /settings, /status, /help.
 func reactionLabel(r Reaction) string {
 	switch r {
 	case ReactionIgnore:
@@ -112,23 +109,21 @@ func (d *Detector) showHelp(m *tgbotapi.Message) {
 }
 
 func (d *Detector) showStatus(m *tgbotapi.Message) {
+	chatID := m.Chat.ID
+	s := d.settingsFor(chatID)
 	n := 0
-	_ = d.st.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n)
+	_ = d.st.db.QueryRow("SELECT COUNT(*) FROM messages WHERE chat_id = ?", chatID).Scan(&n)
 	text := fmt.Sprintf("Антидубль\nЧат: %d\nПериод слежения: %d сут\nАвтоудаление: %s\nСообщений в базе: %d",
-		d.chatID, d.cfg.RetentionDays, autoDeleteLabel(d.cfg.AutoDeleteHours), n)
+		chatID, s.RetentionDays, autoDeleteLabel(s.AutoDeleteHours), n)
 	_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, text))
 }
 
 func (d *Detector) showSettingsMenu(m *tgbotapi.Message) {
-	if m.Chat.ID != d.chatID {
-		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, "Настройки доступны только в основном чате"))
-		return
-	}
 	if !d.isAdmin(m.Chat.ID, m.From.ID) {
 		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, "Только для админов чата"))
 		return
 	}
-	text, kb := d.mainMenu()
+	text, kb := d.mainMenu(d.settingsFor(m.Chat.ID))
 	msg := tgbotapi.NewMessage(m.Chat.ID, text)
 	msg.ReplyMarkup = kb
 	_, _ = d.bot.Send(msg)
@@ -161,17 +156,16 @@ func deletedOriginalLabel(p string) string {
 	return "строгая"
 }
 
-func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
-	c := d.cfg
+func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
 	text := "Настройки Антидубля\n\n" +
-		"Период слежения: " + strconv.Itoa(c.RetentionDays) + " сут — повтор сообщения\n" +
+		"Период слежения: " + strconv.Itoa(s.RetentionDays) + " сут — повтор сообщения\n" +
 		"в течение этого срока считается дублем.\n" +
-		"Картинки: " + photoModeLabel(c.PhotoMode) + "\n" +
-		"Удалённый оригинал: " + deletedOriginalLabel(c.DeletedOriginalPolicy) + "\n" +
-		"Автоудаление сообщений бота: " + autoDeleteLabel(c.AutoDeleteHours)
+		"Картинки: " + photoModeLabel(s.PhotoMode) + "\n" +
+		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
+		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Период слежения: "+strconv.Itoa(c.RetentionDays)+" сут", "ret:view"),
+			btn("Период слежения: "+strconv.Itoa(s.RetentionDays)+" сут", "ret:view"),
 			btn("−", "ret:-1"),
 			btn("+", "ret:+1"),
 		),
@@ -184,18 +178,18 @@ func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 			btn("Предупреждения: разные", "m:warn:"+string(CatDiffParticipant)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Картинки: "+photoModeLabel(c.PhotoMode), "photo:view"),
+			btn("Картинки: "+photoModeLabel(s.PhotoMode), "photo:view"),
 			btn("по ID", "photo:"+PhotoModeExact),
 			btn("по содержимому", "photo:"+PhotoModePerceptual),
 			btn("выкл", "photo:"+PhotoModeOff),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Удалённый оригинал: "+deletedOriginalLabel(c.DeletedOriginalPolicy), "delpol:view"),
+			btn("Удалённый оригинал: "+deletedOriginalLabel(s.DeletedOriginalPolicy), "delpol:view"),
 			btn("Пропускать", "delpol:"+DeletedOriginalAllow),
 			btn("Строгая", "delpol:"+DeletedOriginalStrict),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Автоудаление: "+autoDeleteLabel(c.AutoDeleteHours), "ad:view"),
+			btn("Автоудаление: "+autoDeleteLabel(s.AutoDeleteHours), "ad:view"),
 			btn("выкл", "ad:off"),
 			btn("−", "ad:-1"),
 			btn("+", "ad:+1"),
@@ -207,14 +201,14 @@ func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 	return text, kb
 }
 
-func (d *Detector) reactionsMenu(typ DupType) (string, tgbotapi.InlineKeyboardMarkup) {
+func (d *Detector) reactionsMenu(typ DupType, s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
 	var rs ReactionSettings
 	name := "сообщения"
 	if typ == DupTypeLink {
-		rs = d.cfg.Reactions.Link
+		rs = s.Reactions.Link
 		name = "ссылки"
 	} else {
-		rs = d.cfg.Reactions.Message
+		rs = s.Reactions.Message
 	}
 	text := "Реакции на дубль " + name + "\n\n" +
 		"От одного участника: " + reactionLabel(rs.SameParticipant) + "\n" +
@@ -237,13 +231,13 @@ func (d *Detector) reactionsMenu(typ DupType) (string, tgbotapi.InlineKeyboardMa
 	return text, kb
 }
 
-func (d *Detector) warningsMenu(cat DupCategory) (string, tgbotapi.InlineKeyboardMarkup) {
+func (d *Detector) warningsMenu(cat DupCategory, s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
 	var ws WarningSettings
 	name := "одного участника"
 	if cat == CatSameParticipant {
-		ws = d.cfg.Warnings.SameParticipant
+		ws = s.Warnings.SameParticipant
 	} else {
-		ws = d.cfg.Warnings.DiffParticipant
+		ws = s.Warnings.DiffParticipant
 		name = "разных участников"
 	}
 	prefix := "w:" + string(cat)
@@ -285,18 +279,18 @@ func (d *Detector) warningsMenu(cat DupCategory) (string, tgbotapi.InlineKeyboar
 // ---------------------------------------------------------------------
 
 // routeMenu returns the menu to render for a callback data prefix.
-func (d *Detector) routeMenu(parts []string) (string, tgbotapi.InlineKeyboardMarkup) {
+func (d *Detector) routeMenu(parts []string, s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
 	switch {
 	case len(parts) >= 3 && parts[0] == "m" && parts[1] == "react":
-		return d.reactionsMenu(DupType(parts[2]))
+		return d.reactionsMenu(DupType(parts[2]), s)
 	case len(parts) >= 3 && parts[0] == "m" && parts[1] == "warn":
-		return d.warningsMenu(DupCategory(parts[2]))
+		return d.warningsMenu(DupCategory(parts[2]), s)
 	case len(parts) == 2 && parts[0] == "r":
-		return d.reactionsMenu(DupType(parts[1]))
+		return d.reactionsMenu(DupType(parts[1]), s)
 	case len(parts) == 2 && parts[0] == "w":
-		return d.warningsMenu(DupCategory(parts[1]))
+		return d.warningsMenu(DupCategory(parts[1]), s)
 	default:
-		return d.mainMenu()
+		return d.mainMenu(s)
 	}
 }
 
@@ -304,6 +298,7 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	msgID := cq.Message.MessageID
 	parts := strings.Split(cq.Data, ":")
+	s := d.settingsFor(chatID)
 
 	changed := false
 	switch parts[0] {
@@ -318,30 +313,30 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 	case "ret":
 		switch parts[1] {
 		case "+1":
-			d.cfg.RetentionDays = clamp(d.cfg.RetentionDays+1, MinRetentionDays, MaxRetentionDays)
+			s.RetentionDays = clamp(s.RetentionDays+1, MinRetentionDays, MaxRetentionDays)
 			changed = true
 		case "-1":
-			d.cfg.RetentionDays = clamp(d.cfg.RetentionDays-1, MinRetentionDays, MaxRetentionDays)
+			s.RetentionDays = clamp(s.RetentionDays-1, MinRetentionDays, MaxRetentionDays)
 			changed = true
 		}
 	case "ad":
-		maxAuto := d.cfg.RetentionDays * 24
+		maxAuto := s.RetentionDays * 24
 		switch parts[1] {
 		case "off":
-			d.cfg.AutoDeleteHours = 0
+			s.AutoDeleteHours = 0
 			changed = true
 		case "+1":
-			d.cfg.AutoDeleteHours = clamp(d.cfg.AutoDeleteHours+1, 0, maxAuto)
+			s.AutoDeleteHours = clamp(s.AutoDeleteHours+1, 0, maxAuto)
 			changed = true
 		case "-1":
-			d.cfg.AutoDeleteHours = clamp(d.cfg.AutoDeleteHours-1, 0, maxAuto)
+			s.AutoDeleteHours = clamp(s.AutoDeleteHours-1, 0, maxAuto)
 			changed = true
 		}
 	case "delpol":
 		if len(parts) == 2 {
 			switch parts[1] {
 			case DeletedOriginalAllow, DeletedOriginalStrict:
-				d.cfg.DeletedOriginalPolicy = parts[1]
+				s.DeletedOriginalPolicy = parts[1]
 				changed = true
 			}
 		}
@@ -349,7 +344,7 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		if len(parts) == 2 {
 			switch parts[1] {
 			case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
-				d.cfg.PhotoMode = parts[1]
+				s.PhotoMode = parts[1]
 				changed = true
 			}
 		}
@@ -359,9 +354,9 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 			typ, cat, reac := DupType(parts[1]), DupCategory(parts[2]), Reaction(parts[3])
 			if validReaction(reac) {
 				if typ == DupTypeLink {
-					setReaction(&d.cfg.Reactions.Link, cat, reac)
+					setReaction(&s.Reactions.Link, cat, reac)
 				} else {
-					setReaction(&d.cfg.Reactions.Message, cat, reac)
+					setReaction(&s.Reactions.Message, cat, reac)
 				}
 				changed = true
 			}
@@ -370,23 +365,19 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		// w:<cat>:<field>:<value>
 		if len(parts) == 4 {
 			cat := DupCategory(parts[1])
-			ws := d.warningSettingsPtr(cat)
+			ws := warningSettingsPtr(s, cat)
 			if ws != nil {
-				changed = applyWarningChange(ws, parts[2], parts[3], d.cfg.RetentionDays)
+				changed = applyWarningChange(ws, parts[2], parts[3], s.RetentionDays)
 			}
 		}
 	}
 
 	if changed {
-		if err := writeConfig(d.configPath, d.cfg); err != nil {
-			log.Printf("[cmd] сохранение конфига: %v", err)
-			_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, "Ошибка сохранения"))
-			return
-		}
+		d.persistSettings(chatID, s)
 	}
 
 	// re-render the current menu
-	text, kb := d.routeMenu(parts)
+	text, kb := d.routeMenu(parts, s)
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageText(chatID, msgID, text))
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageReplyMarkup(chatID, msgID, kb))
 	_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
@@ -400,11 +391,11 @@ func setReaction(rs *ReactionSettings, cat DupCategory, r Reaction) {
 	}
 }
 
-func (d *Detector) warningSettingsPtr(cat DupCategory) *WarningSettings {
+func warningSettingsPtr(s *Settings, cat DupCategory) *WarningSettings {
 	if cat == CatSameParticipant {
-		return &d.cfg.Warnings.SameParticipant
+		return &s.Warnings.SameParticipant
 	}
-	return &d.cfg.Warnings.DiffParticipant
+	return &s.Warnings.DiffParticipant
 }
 
 func applyWarningChange(ws *WarningSettings, field, value string, retention int) bool {

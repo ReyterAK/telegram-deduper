@@ -73,7 +73,6 @@ type Warnings struct {
 
 type Config struct {
 	BotToken        string  `json:"bot_token"`
-	ChatID          int64   `json:"chat_id"` // 0 = auto-lock to the first group seen
 	RetentionDays   int     `json:"retention_days"`
 	Reactions       Reactions `json:"reactions"`
 	Warnings        Warnings  `json:"warnings"`
@@ -87,6 +86,31 @@ type Config struct {
 	// "strict" — flagged content stays flagged for the window: the
 	// repeat is deleted anyway.
 	DeletedOriginalPolicy string `json:"deleted_original_policy"`
+}
+
+// Settings is the tunable subset of the config, stored per chat
+// (chat_settings table). New chats are initialized from the global
+// config values.
+type Settings struct {
+	RetentionDays         int        `json:"retention_days"`
+	Reactions             Reactions  `json:"reactions"`
+	Warnings              Warnings   `json:"warnings"`
+	AutoDeleteHours       int        `json:"auto_delete_hours"`
+	PhotoMode             string     `json:"photo_mode"`
+	DeletedOriginalPolicy string     `json:"deleted_original_policy"`
+}
+
+// asSettings returns the tunable subset of the global config —
+// the defaults for newly seen chats.
+func (c *Config) asSettings() *Settings {
+	return &Settings{
+		RetentionDays:         c.RetentionDays,
+		Reactions:             c.Reactions,
+		Warnings:              c.Warnings,
+		AutoDeleteHours:       c.AutoDeleteHours,
+		PhotoMode:             c.PhotoMode,
+		DeletedOriginalPolicy: c.DeletedOriginalPolicy,
+	}
 }
 
 // Photo mode values.
@@ -106,7 +130,6 @@ const (
 func DefaultConfig() *Config {
 	return &Config{
 		BotToken:      "",
-		ChatID:        0,
 		RetentionDays: DefaultRetentionDays,
 		Reactions: Reactions{
 			Link: ReactionSettings{
@@ -260,13 +283,4 @@ func writeConfig(configPath string, cfg *Config) error {
 		return err
 	}
 	return os.WriteFile(configPath, data, 0o644)
-}
-
-// SaveChatID persists the auto-learned chat id.
-func (c *Config) SaveChatID(path string, chatID int64) error {
-	if c.ChatID == chatID {
-		return nil
-	}
-	c.ChatID = chatID
-	return writeConfig(path, c)
 }
