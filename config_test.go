@@ -81,6 +81,17 @@ func TestConfigValidationErrors(t *testing.T) {
 	if cfg.DeletedOriginalPolicy != DeletedOriginalStrict {
 		t.Fatalf("invalid policy must fall back to strict, got %q", cfg.DeletedOriginalPolicy)
 	}
+	cfg = DefaultConfig()
+	if cfg.FreshnessMinutes != DefaultFreshnessMinutes {
+		t.Fatalf("freshness default = %d", cfg.FreshnessMinutes)
+	}
+	cfg.FreshnessMinutes = 999
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if cfg.FreshnessMinutes != DefaultFreshnessMinutes {
+		t.Fatalf("invalid freshness must clamp to default, got %d", cfg.FreshnessMinutes)
+	}
 }
 
 func TestConfigRoundTrip(t *testing.T) {

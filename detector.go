@@ -87,6 +87,10 @@ func (d *Detector) settingsFor(chatID int64) *Settings {
 		if err := json.Unmarshal([]byte(raw), s); err != nil {
 			log.Printf("[chat] чтение настроек чата %d: %v", chatID, err)
 		}
+		// migration: settings added after this chat was stored
+		if !hasJSONKey([]byte(raw), "freshness_minutes") {
+			s.FreshnessMinutes = DefaultFreshnessMinutes
+		}
 	} else if err == nil {
 		// first contact — persist the defaults
 		d.persistSettings(chatID, s)
@@ -235,18 +239,14 @@ func classify(hasURL, forwardExternal bool) DupType {
 	return DupTypeMessage
 }
 
-// FreshnessWindowSec is how old a message may be (by send time) for
-// the bot to react to it. Older messages (backlog after downtime)
-// are remembered but not acted upon, unless react_to_old is set.
-const FreshnessWindowSec = 5 * 60
-
 // shouldReact reports whether a message deserves a reaction, based
-// on its send time and the react_to_old policy.
+// on its send time and the freshness threshold. freshness_minutes=0
+// means react to everything.
 func shouldReact(s *Settings, msgDate, now int64) bool {
-	if s.ReactToOld {
+	if s.FreshnessMinutes <= 0 {
 		return true
 	}
-	return now-msgDate <= FreshnessWindowSec
+	return now-msgDate <= int64(s.FreshnessMinutes)*60
 }
 
 // Process handles one incoming message: store, detect, react.

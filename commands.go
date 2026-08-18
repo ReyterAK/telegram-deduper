@@ -124,9 +124,8 @@ func helpText() string {
 		"ПОЛИТИКИ\n" +
 		"• Удалённый оригинал: реагировать — дубль удаляется, даже если первое сообщение " +
 		"удалили; пропускать — повтор при удалённом оригинале проходит.\n" +
-		"• Старые сообщения (до 24 ч) после простоя: не реагировать — пропущенные ботом " +
-		"сообщения запоминаются, но не удаляются и не предупреждаются (по умолчанию); " +
-		"реагировать — бэклог обрабатывается как живой.\n" +
+		"• Порог свежести — сообщения старше N минут (например, накопившиеся за простой бота) " +
+		"только запоминаются, без удалений и предупреждений; выкл — реагировать на все.\n" +
 		"• Автоудаление — сообщения бота (уведомления) удаляются через N часов.\n\n" +
 		"КОМАНДЫ\n" +
 		"/settings — настройки этого чата (только админы)\n" +
@@ -187,11 +186,11 @@ func deletedOriginalLabel(p string) string {
 	return "реагировать"
 }
 
-func reactToOldLabel(b bool) string {
-	if b {
-		return "реагировать"
+func freshnessLabel(m int) string {
+	if m <= 0 {
+		return "выкл"
 	}
-	return "не реагировать"
+	return strconv.Itoa(m) + " мин"
 }
 
 func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
@@ -200,7 +199,7 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		"в течение этого срока считается дублем.\n" +
 		"Картинки: " + photoModeLabel(s.PhotoMode) + "\n" +
 		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
-		"Старые сообщения после простоя (до 24 ч): " + reactToOldLabel(s.ReactToOld) + "\n" +
+		"Порог свежести: " + freshnessLabel(s.FreshnessMinutes) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -228,9 +227,10 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("Пропускать", "delpol:"+DeletedOriginalAllow),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Старые (до 24 ч): "+reactToOldLabel(s.ReactToOld), "old:view"),
-			btn("Не реагировать", "old:no"),
-			btn("Реагировать", "old:yes"),
+			btn("Порог свежести: "+freshnessLabel(s.FreshnessMinutes), "fresh:view"),
+			btn("−", "fresh:-1"),
+			btn("+", "fresh:+1"),
+			btn("выкл", "fresh:off"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Автоудаление: "+autoDeleteLabel(s.AutoDeleteHours), "ad:view"),
@@ -379,16 +379,17 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 			s.AutoDeleteHours = clamp(s.AutoDeleteHours-1, 0, maxAuto)
 			changed = true
 		}
-	case "old":
-		if len(parts) == 2 {
-			switch parts[1] {
-			case "no":
-				s.ReactToOld = false
-				changed = true
-			case "yes":
-				s.ReactToOld = true
-				changed = true
-			}
+	case "fresh":
+		switch parts[1] {
+		case "off":
+			s.FreshnessMinutes = 0
+			changed = true
+		case "+1":
+			s.FreshnessMinutes = clamp(s.FreshnessMinutes+1, 0, MaxFreshnessMinutes)
+			changed = true
+		case "-1":
+			s.FreshnessMinutes = clamp(s.FreshnessMinutes-1, 0, MaxFreshnessMinutes)
+			changed = true
 		}
 	case "delpol":
 		if len(parts) == 2 {

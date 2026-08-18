@@ -140,13 +140,13 @@ func TestRouteMenuWarningsCategories(t *testing.T) {
 // between chats, persisted to the store.
 func TestShouldReact(t *testing.T) {
 	now := int64(1000000)
-	s := &Settings{}
+	s := &Settings{FreshnessMinutes: 5}
 
 	// fresh message → react
 	if !shouldReact(s, now-10, now) {
 		t.Fatal("fresh message must react")
 	}
-	// within the freshness window (5 min) → react
+	// within the freshness window (5 min = 300 s) → react
 	if !shouldReact(s, now-299, now) {
 		t.Fatal("message inside the window must react")
 	}
@@ -154,10 +154,10 @@ func TestShouldReact(t *testing.T) {
 	if shouldReact(s, now-301, now) {
 		t.Fatal("message outside the window must not react")
 	}
-	// react_to_old=true overrides everything
-	s.ReactToOld = true
+	// freshness=0 → react to everything
+	s.FreshnessMinutes = 0
 	if !shouldReact(s, now-100000, now) {
-		t.Fatal("react_to_old must force reactions")
+		t.Fatal("freshness 0 must force reactions")
 	}
 }
 
@@ -183,12 +183,26 @@ func TestIsBannedStatus(t *testing.T) {
 	}
 }
 
-func TestReactToOldLabel(t *testing.T) {
-	if got := reactToOldLabel(false); got != "не реагировать" {
-		t.Fatalf("false = %q", got)
+func TestFreshnessLabel(t *testing.T) {
+	if got := freshnessLabel(0); got != "выкл" {
+		t.Fatalf("0 = %q", got)
 	}
-	if got := reactToOldLabel(true); got != "реагировать" {
-		t.Fatalf("true = %q", got)
+	if got := freshnessLabel(5); got != "5 мин" {
+		t.Fatalf("5 = %q", got)
+	}
+}
+
+// Legacy chat settings (stored before freshness_minutes existed) must
+// migrate to the default freshness instead of the zero value.
+func TestSettingsFreshnessMigration(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-1001)
+	if err := st.SaveChatSettings(chat, `{"retention_days":10,"react_to_old":false}`); err != nil {
+		t.Fatal(err)
+	}
+	d := NewDetector(DefaultConfig(), st, nil, "")
+	if got := d.settingsFor(chat).FreshnessMinutes; got != DefaultFreshnessMinutes {
+		t.Fatalf("migrated freshness = %d, want %d", got, DefaultFreshnessMinutes)
 	}
 }
 

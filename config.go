@@ -86,12 +86,17 @@ type Config struct {
 	// "strict" — flagged content stays flagged for the window: the
 	// repeat is deleted anyway.
 	DeletedOriginalPolicy string `json:"deleted_original_policy"`
-	// ReactToOld: react to messages older than the freshness window
-	// (e.g. a backlog after the bot was offline). When false (default),
-	// old messages are remembered but not reacted to — no retroactive
-	// deletions, notices or warnings.
-	ReactToOld bool `json:"react_to_old"`
+	// FreshnessMinutes: messages older than this (by send time) are
+	// remembered but not reacted to (backlog after downtime).
+	// 0 = react to everything.
+	FreshnessMinutes int `json:"freshness_minutes"`
 }
+
+// Freshness bounds.
+const (
+	DefaultFreshnessMinutes = 5
+	MaxFreshnessMinutes     = 60
+)
 
 // Settings is the tunable subset of the config, stored per chat
 // (chat_settings table). New chats are initialized from the global
@@ -103,7 +108,7 @@ type Settings struct {
 	AutoDeleteHours       int        `json:"auto_delete_hours"`
 	PhotoMode             string     `json:"photo_mode"`
 	DeletedOriginalPolicy string     `json:"deleted_original_policy"`
-	ReactToOld            bool       `json:"react_to_old"`
+	FreshnessMinutes      int        `json:"freshness_minutes"`
 }
 
 // asSettings returns the tunable subset of the global config —
@@ -116,7 +121,7 @@ func (c *Config) asSettings() *Settings {
 		AutoDeleteHours:       c.AutoDeleteHours,
 		PhotoMode:             c.PhotoMode,
 		DeletedOriginalPolicy: c.DeletedOriginalPolicy,
-		ReactToOld:            c.ReactToOld,
+		FreshnessMinutes:      c.FreshnessMinutes,
 	}
 }
 
@@ -168,6 +173,7 @@ func DefaultConfig() *Config {
 		PhotoMode:       PhotoModePerceptual,
 		// Strict by default: once-flagged content stays flagged.
 		DeletedOriginalPolicy: DeletedOriginalStrict,
+		FreshnessMinutes:      DefaultFreshnessMinutes,
 	}
 }
 
@@ -254,11 +260,26 @@ func (c *Config) validate() error {
 		log.Printf("[config] deleted_original_policy=%q неизвестна, установлено %q", c.DeletedOriginalPolicy, DeletedOriginalStrict)
 		c.DeletedOriginalPolicy = DeletedOriginalStrict
 	}
+	if c.FreshnessMinutes < 0 || c.FreshnessMinutes > MaxFreshnessMinutes {
+		log.Printf("[config] freshness_minutes=%d вне 0..%d, установлено %d", c.FreshnessMinutes, MaxFreshnessMinutes, DefaultFreshnessMinutes)
+		c.FreshnessMinutes = DefaultFreshnessMinutes
+	}
 	return nil
 }
 
 // LoadConfig reads configPath; a missing file creates defaults and
 // writes them back. Parsing or validation failures are fatal.
+// hasJSONKey reports whether a JSON object contains the key
+// (used for schema migrations when adding new settings).
+func hasJSONKey(data []byte, key string) bool {
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal(data, &m); err != nil {
+		return false
+	}
+	_, ok := m[key]
+	return ok
+}
+
 func LoadConfig(configPath string) (*Config, error) {
 	cfg := DefaultConfig()
 	data, err := os.ReadFile(configPath)
@@ -274,6 +295,10 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if err := json.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("parse config %s: %w", configPath, err)
+	}
+	// migration: settings added after this config was written
+	if !hasJSONKey(data, "freshness_minutes") {
+		cfg.FreshnessMinutes = DefaultFreshnessMinutes
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
