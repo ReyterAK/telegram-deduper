@@ -114,7 +114,7 @@ func (d *Detector) showHelp(m *tgbotapi.Message) {
 func (d *Detector) showStatus(m *tgbotapi.Message) {
 	n := 0
 	_ = d.st.db.QueryRow("SELECT COUNT(*) FROM messages").Scan(&n)
-	text := fmt.Sprintf("Антидубль\nЧат: %d\nОкно: %d сут\nАвтоудаление: %s\nСообщений в базе: %d",
+	text := fmt.Sprintf("Антидубль\nЧат: %d\nПериод слежения: %d сут\nАвтоудаление: %s\nСообщений в базе: %d",
 		d.chatID, d.cfg.RetentionDays, autoDeleteLabel(d.cfg.AutoDeleteHours), n)
 	_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, text))
 }
@@ -145,11 +145,12 @@ func btn(text, data string) tgbotapi.InlineKeyboardButton {
 func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 	c := d.cfg
 	text := "Настройки Антидубля\n\n" +
-		"Окно хранения: " + strconv.Itoa(c.RetentionDays) + " сут\n" +
+		"Период слежения: " + strconv.Itoa(c.RetentionDays) + " сут — повтор сообщения\n" +
+		"в течение этого срока считается дублем.\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(c.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Окно: "+strconv.Itoa(c.RetentionDays)+" сут", "ret:view"),
+			btn("Период слежения: "+strconv.Itoa(c.RetentionDays)+" сут", "ret:view"),
 			btn("−", "ret:-1"),
 			btn("+", "ret:+1"),
 		),
@@ -158,8 +159,8 @@ func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 			btn("Реакции: сообщение", "m:react:message"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Предупреждения: один участник", "m:warn:same"),
-			btn("Предупреждения: разные", "m:warn:diff"),
+			btn("Предупреждения: один участник", "m:warn:"+string(CatSameParticipant)),
+			btn("Предупреждения: разные", "m:warn:"+string(CatDiffParticipant)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Автоудаление: "+autoDeleteLabel(c.AutoDeleteHours), "ad:view"),
@@ -251,6 +252,22 @@ func (d *Detector) warningsMenu(cat DupCategory) (string, tgbotapi.InlineKeyboar
 // callback handling
 // ---------------------------------------------------------------------
 
+// routeMenu returns the menu to render for a callback data prefix.
+func (d *Detector) routeMenu(parts []string) (string, tgbotapi.InlineKeyboardMarkup) {
+	switch {
+	case len(parts) >= 3 && parts[0] == "m" && parts[1] == "react":
+		return d.reactionsMenu(DupType(parts[2]))
+	case len(parts) >= 3 && parts[0] == "m" && parts[1] == "warn":
+		return d.warningsMenu(DupCategory(parts[2]))
+	case len(parts) == 2 && parts[0] == "r":
+		return d.reactionsMenu(DupType(parts[1]))
+	case len(parts) == 2 && parts[0] == "w":
+		return d.warningsMenu(DupCategory(parts[1]))
+	default:
+		return d.mainMenu()
+	}
+}
+
 func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 	chatID := cq.Message.Chat.ID
 	msgID := cq.Message.MessageID
@@ -321,20 +338,7 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 	}
 
 	// re-render the current menu
-	var text string
-	var kb tgbotapi.InlineKeyboardMarkup
-	switch {
-	case len(parts) >= 2 && parts[0] == "m" && parts[1] == "react":
-		text, kb = d.reactionsMenu(DupType(parts[2]))
-	case len(parts) >= 2 && parts[0] == "m" && parts[1] == "warn":
-		text, kb = d.warningsMenu(DupCategory(parts[2]))
-	case len(parts) == 2 && parts[0] == "r":
-		text, kb = d.reactionsMenu(DupType(parts[1]))
-	case len(parts) == 2 && parts[0] == "w":
-		text, kb = d.warningsMenu(DupCategory(parts[1]))
-	default:
-		text, kb = d.mainMenu()
-	}
+	text, kb := d.routeMenu(parts)
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageText(chatID, msgID, text))
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageReplyMarkup(chatID, msgID, kb))
 	_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))

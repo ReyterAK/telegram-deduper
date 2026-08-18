@@ -96,3 +96,43 @@ func TestMenusRender(t *testing.T) {
 		t.Fatal("warnings menu empty")
 	}
 }
+
+// Regression: the warnings navigation must open the CORRECT category
+// (short keys "same"/"diff" used to map onto "diff_participant").
+func TestRouteMenuWarningsCategories(t *testing.T) {
+	d := &Detector{cfg: DefaultConfig()}
+
+	text, _ := d.routeMenu([]string{"m", "warn", string(CatSameParticipant)})
+	if !contains(text, "одного участника") {
+		t.Fatalf("same menu title wrong: %q", text)
+	}
+	text, _ = d.routeMenu([]string{"m", "warn", string(CatDiffParticipant)})
+	if !contains(text, "разных участников") {
+		t.Fatalf("diff menu title wrong: %q", text)
+	}
+
+	// reactions navigation
+	text, _ = d.routeMenu([]string{"m", "react", "link"})
+	if !contains(text, "ссылки") {
+		t.Fatalf("link reactions menu title wrong: %q", text)
+	}
+	text, _ = d.routeMenu([]string{"m", "react", "message"})
+	if !contains(text, "сообщения") {
+		t.Fatalf("message reactions menu title wrong: %q", text)
+	}
+
+	// main menu on unknown data
+	text, _ = d.routeMenu([]string{"ret", "view"})
+	if !contains(text, "Период слежения") {
+		t.Fatalf("main menu lost: %q", text)
+	}
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
