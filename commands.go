@@ -228,8 +228,8 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Порог свежести: "+freshnessLabel(s.FreshnessMinutes), "fresh:view"),
-			btn("−", "fresh:-1"),
-			btn("+", "fresh:+1"),
+			btn("−5", "fresh:-1"),
+			btn("+5", "fresh:+1"),
 			btn("выкл", "fresh:off"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
@@ -385,10 +385,10 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 			s.FreshnessMinutes = 0
 			changed = true
 		case "+1":
-			s.FreshnessMinutes = clamp(s.FreshnessMinutes+1, 0, MaxFreshnessMinutes)
+			s.FreshnessMinutes = clamp(s.FreshnessMinutes+5, 0, MaxFreshnessMinutes)
 			changed = true
 		case "-1":
-			s.FreshnessMinutes = clamp(s.FreshnessMinutes-1, 0, MaxFreshnessMinutes)
+			s.FreshnessMinutes = clamp(s.FreshnessMinutes-5, 0, MaxFreshnessMinutes)
 			changed = true
 		}
 	case "delpol":
