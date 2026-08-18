@@ -161,6 +161,15 @@ func TestShouldReact(t *testing.T) {
 	}
 }
 
+func TestHelpText(t *testing.T) {
+	h := helpText()
+	for _, key := range []string{"КАК РАБОТАЕТ", "РЕАКЦИИ", "ПРЕДУПРЕЖДЕНИЯ", "ПОЛИТИКИ", "/settings", "/status", "/help", "ПЕРВОЕ ВХОЖДЕНИЕ НИКОГДА НЕ УДАЛЯЕТСЯ"} {
+		if !contains(h, key) {
+			t.Fatalf("help missing section %q", key)
+		}
+	}
+}
+
 func TestReactToOldLabel(t *testing.T) {
 	if got := reactToOldLabel(false); got != "не реагировать" {
 		t.Fatalf("false = %q", got)
