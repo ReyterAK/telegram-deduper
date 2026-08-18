@@ -139,11 +139,11 @@ func (s *Store) AddMessage(m StoredMessage) error {
 
 // FindPhotoDuplicate scans the window for a stored photo whose dHash
 // is within the Hamming threshold; the oldest match wins. Returns
-// nil when nothing is close enough.
-func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, threshold int) (*StoredMessage, error) {
+// nil when nothing is close enough, plus the closest distance seen.
+func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, threshold int) (*StoredMessage, int, error) {
 	needle, err := hex.DecodeString(phash)
 	if err != nil || len(needle) != 8 {
-		return nil, nil
+		return nil, 64, nil
 	}
 	var want uint64
 	for i := range 8 {
@@ -157,15 +157,16 @@ func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, thre
 		 ORDER BY ts ASC, id ASC
 		 LIMIT 500`, chatID, since)
 	if err != nil {
-		return nil, err
+		return nil, 64, err
 	}
 	defer rows.Close()
 
+	minDist := 64
 	for rows.Next() {
 		var m StoredMessage
 		var hasURL, fe int
 		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &fe, &m.FwdSource, &m.PhotoHash, &m.TS); err != nil {
-			return nil, err
+			return nil, 64, err
 		}
 		m.HasURL = hasURL != 0
 		m.ForwardExternal = fe != 0
@@ -178,11 +179,15 @@ func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, thre
 		for i := range 8 {
 			got |= uint64(raw[i]) << (8 * uint(7-i))
 		}
-		if hamming(got, want) <= threshold {
-			return &m, nil
+		dist := hamming(got, want)
+		if dist < minDist {
+			minDist = dist
+		}
+		if dist <= threshold {
+			return &m, minDist, nil
 		}
 	}
-	return nil, rows.Err()
+	return nil, minDist, rows.Err()
 }
 
 // UpdateMessage refreshes the comparable content of an existing

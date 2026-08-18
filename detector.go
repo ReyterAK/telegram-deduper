@@ -233,11 +233,13 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 			log.Printf("[photo] хеш фотографии: %v", err)
 		} else {
 			c.PhotoHash = ph
-			if pm, err := d.st.FindPhotoDuplicate(chatID, window, ph, PhotoHashThreshold); err != nil {
+			if pm, minDist, err := d.st.FindPhotoDuplicate(chatID, window, ph, PhotoHashThreshold); err != nil {
 				log.Printf("[photo] поиск по содержимому: %v", err)
 			} else if pm != nil {
-				log.Printf("[photo] фото совпало по содержимому с msg %d (hamming ≤ %d)", pm.MsgID, PhotoHashThreshold)
+				log.Printf("[photo] фото совпало по содержимому с msg %d (hamming %d ≤ %d)", pm.MsgID, minDist, PhotoHashThreshold)
 				dups = []StoredMessage{*pm}
+			} else {
+				log.Printf("[photo] совпадений нет, ближайший хэш на расстоянии %d (порог %d)", minDist, PhotoHashThreshold)
 			}
 		}
 	}

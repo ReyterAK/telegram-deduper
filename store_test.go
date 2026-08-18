@@ -171,19 +171,25 @@ func TestFindPhotoDuplicate(t *testing.T) {
 	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, PhotoHash: "ffffffffffffffff", TS: now})
 
 	// exact same hash → duplicate
-	m, err := st.FindPhotoDuplicate(chat, now-86400, "ffffffffffffffff", PhotoHashThreshold)
+	m, minDist, err := st.FindPhotoDuplicate(chat, now-86400, "ffffffffffffffff", PhotoHashThreshold)
 	if err != nil || m == nil || m.MsgID != 1 {
 		t.Fatalf("exact hash match failed: %+v err=%v", m, err)
 	}
+	if minDist != 0 {
+		t.Fatalf("exact match must have distance 0, got %d", minDist)
+	}
 	// one bit off → still a duplicate (within threshold)
-	m, err = st.FindPhotoDuplicate(chat, now-86400, "fffffffeffffffff", PhotoHashThreshold)
+	m, _, err = st.FindPhotoDuplicate(chat, now-86400, "fffffffeffffffff", PhotoHashThreshold)
 	if err != nil || m == nil {
 		t.Fatalf("near hash must match: %+v err=%v", m, err)
 	}
-	// all bits different → no duplicate
-	m, err = st.FindPhotoDuplicate(chat, now-86400, "0000000000000000", PhotoHashThreshold)
+	// all bits different → no duplicate, closest distance reported
+	m, minDist, err = st.FindPhotoDuplicate(chat, now-86400, "0000000000000000", PhotoHashThreshold)
 	if err != nil || m != nil {
 		t.Fatalf("far hash must not match: %+v err=%v", m, err)
+	}
+	if minDist != 64 {
+		t.Fatalf("closest distance = %d, want 64", minDist)
 	}
 }
 
