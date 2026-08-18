@@ -34,6 +34,13 @@ func TestApplyTextValue(t *testing.T) {
 	if msg, ok := applyTextValue(s, "freshness", "999"); ok || msg == "" {
 		t.Fatalf("out of range must fail with message, got ok=%v msg=%q", ok, msg)
 	}
+	// negative values must be rejected by the range check
+	if msg, ok := applyTextValue(s, "freshness", "-5"); ok || msg == "" {
+		t.Fatalf("negative must fail with message, got ok=%v msg=%q", ok, msg)
+	}
+	if msg, ok := applyTextValue(s, "freshness", "+5"); !ok || s.FreshnessMinutes != 5 {
+		t.Fatalf("+5 must apply: ok=%v msg=%q", ok, msg)
+	}
 
 	if msg, ok := applyTextValue(s, "retention", "5"); !ok || s.RetentionDays != 5 {
 		t.Fatalf("retention 5: ok=%v msg=%q", ok, msg)
