@@ -30,6 +30,7 @@ type StoredMessage struct {
 	ForwardExternal bool
 	FwdSource       string
 	PhotoHash       string
+	ContentSHA      string
 	TS              int64
 }
 
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	forward_external INTEGER NOT NULL DEFAULT 0,
 	fwd_source TEXT NOT NULL DEFAULT '',
 	media_phash TEXT NOT NULL DEFAULT '',
+	media_sha TEXT NOT NULL DEFAULT '',
 	ts INTEGER NOT NULL,
 	UNIQUE(chat_id, msg_id)
 );
@@ -100,6 +102,7 @@ func OpenStore(path string) (*Store, error) {
 		hasFwd := false
 		hasPhash := false
 		hasMType := false
+		hasMSha := false
 		for rows.Next() {
 			var cid int
 			var name, ctype string
@@ -113,6 +116,8 @@ func OpenStore(path string) (*Store, error) {
 					hasPhash = true
 				case "media_type":
 					hasMType = true
+				case "media_sha":
+					hasMSha = true
 				}
 			}
 		}
@@ -137,6 +142,12 @@ func OpenStore(path string) (*Store, error) {
 				return nil, fmt.Errorf("migrate db (media_type): %w", err)
 			}
 		}
+		if !hasMSha {
+			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN media_sha TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("migrate db (media_sha): %w", err)
+			}
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -156,9 +167,9 @@ func (s *Store) AddMessage(m StoredMessage) error {
 		mediaType = MediaTypePhoto
 	}
 	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, media_type, forward_external, fwd_source, media_phash, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, mediaType, b2i(m.ForwardExternal), m.FwdSource, m.PhotoHash, m.TS)
+		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, media_type, forward_external, fwd_source, media_phash, media_sha, ts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, mediaType, b2i(m.ForwardExternal), m.FwdSource, m.PhotoHash, m.ContentSHA, m.TS)
 	return err
 }
 
@@ -214,6 +225,35 @@ func (s *Store) FindPhotoDuplicate(chatID int64, since int64, mediaType, phash s
 		}
 	}
 	return nil, minDist, rows.Err()
+}
+
+// FindContentDuplicate returns the oldest stored document whose
+// SHA-256 content hash matches the incoming one — the document
+// equivalent of exact matching, but over file BYTES (file_unique_id
+// is per-upload for documents, so it cannot catch renamed copies).
+func (s *Store) FindContentDuplicate(chatID int64, since int64, sha string) (*StoredMessage, error) {
+	rows, err := s.db.Query(
+		`SELECT chat_id, msg_id, user_id, norm_text, has_url, media_uid, media_type, forward_external, fwd_source, media_phash, media_sha, ts
+		 FROM messages
+		 WHERE chat_id = ? AND ts >= ? AND media_sha = ?
+		 ORDER BY ts ASC, id ASC
+		 LIMIT 1`, chatID, since, sha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m StoredMessage
+		var hasURL, fe int
+		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &m.MediaType, &fe, &m.FwdSource, &m.PhotoHash, &m.ContentSHA, &m.TS); err != nil {
+			return nil, err
+		}
+		m.HasURL = hasURL != 0
+		m.ForwardExternal = fe != 0
+		return &m, nil
+	}
+	return nil, rows.Err()
 }
 
 // UpdateMessage refreshes the comparable content of an existing

@@ -12,8 +12,11 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"image"
+	"io"
 	"math/bits"
 	"net/http"
 
@@ -105,6 +108,40 @@ func (d *Detector) photoHash(m *tgbotapi.Message) (string, error) {
 		return "", err
 	}
 	return hashFromURL(file.Link(d.bot.Token))
+}
+
+// MaxDownloadBytes caps document downloads for content hashing
+// (the Bot API lets bots download up to 20 MB per file).
+const MaxDownloadBytes = 20 * 1024 * 1024
+
+// contentSHA downloads a document and returns the SHA-256 of its
+// bytes. Documents are matched by content because Telegram assigns
+// file_unique_id per upload for them — byte-identical renamed
+// copies otherwise slip through exact matching.
+func (d *Detector) contentSHA(m *tgbotapi.Message) (string, error) {
+	if m.Document == nil {
+		return "", fmt.Errorf("no document")
+	}
+	if m.Document.FileSize > MaxDownloadBytes {
+		return "", fmt.Errorf("файл %d байт больше лимита %d", m.Document.FileSize, MaxDownloadBytes)
+	}
+	file, err := d.bot.GetFile(tgbotapi.FileConfig{FileID: m.Document.FileID})
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.Get(file.Link(d.bot.Token))
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d", resp.StatusCode)
+	}
+	h := sha256.New()
+	if _, err := io.Copy(h, resp.Body); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 // thumbHash downloads a Telegram thumbnail (video/document) and

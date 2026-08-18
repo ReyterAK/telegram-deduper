@@ -56,6 +56,10 @@ type MsgContent struct {
 	// PhotoHash is the perceptual dHash of the media (photo, or the
 	// thumbnail of a video/document; "" when not computed).
 	PhotoHash string
+	// ContentSHA is the SHA-256 of a downloaded document's bytes
+	// ("" when not computed). Catches renamed identical files that
+	// file_unique_id (per-upload for documents) cannot.
+	ContentSHA string
 }
 
 // Detector wires store + telegram into the duplicate pipeline.
@@ -412,6 +416,11 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 			if ph, err := d.mediaHash(m, c.MediaType); err == nil {
 				c.PhotoHash = ph
 			}
+			if c.MediaType == MediaTypeDocument {
+				if sha, err := d.contentSHA(m); err == nil {
+					c.ContentSHA = sha
+				}
+			}
 		}
 		d.store(c, ts)
 		log.Printf("[detect] сообщение %d от %s старше порога свежести — только запомнено", c.MsgID, time.Unix(ts, 0).Format("15:04:05"))
@@ -433,14 +442,17 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	// nothing and content comparison is enabled for this media type
 	// (photo/video/document), download the image (a photo, or the
 	// thumbnail of a video/document) and compare its dHash against
-	// the window of the same media type.
+	// the window of the same media type. Documents additionally
+	// compare a SHA-256 of the downloaded FILE — file_unique_id is
+	// per-upload for documents, so renamed identical copies need
+	// byte-level matching.
 	if len(dups) == 0 && s.MediaMode(c.MediaType) == PhotoModePerceptual &&
 		c.MediaUID != "" {
+		threshold := mediaThreshold(c.MediaType)
 		if ph, err := d.mediaHash(m, c.MediaType); err != nil {
 			log.Printf("[media] хеш %s: %v", c.MediaType, err)
 		} else {
 			c.PhotoHash = ph
-			threshold := mediaThreshold(c.MediaType)
 			if pm, minDist, err := d.st.FindPhotoDuplicate(chatID, window, c.MediaType, ph, threshold); err != nil {
 				log.Printf("[media] поиск по содержимому: %v", err)
 			} else if pm != nil {
@@ -448,6 +460,19 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 				dups = []StoredMessage{*pm}
 			} else {
 				log.Printf("[media] совпадений нет, ближайший хэш на расстоянии %d (порог %d)", minDist, threshold)
+			}
+		}
+		if len(dups) == 0 && c.MediaType == MediaTypeDocument {
+			if sha, err := d.contentSHA(m); err != nil {
+				log.Printf("[media] sha документа: %v", err)
+			} else {
+				c.ContentSHA = sha
+				if pm, err := d.st.FindContentDuplicate(chatID, window, sha); err != nil {
+					log.Printf("[media] поиск по содержимому файла: %v", err)
+				} else if pm != nil {
+					log.Printf("[media] документ совпал по содержимому файла с msg %d", pm.MsgID)
+					dups = []StoredMessage{*pm}
+				}
 			}
 		}
 	}
@@ -509,6 +534,7 @@ func (d *Detector) store(c MsgContent, ts int64) {
 		ForwardExternal: c.ForwardExternal,
 		FwdSource:       c.FwdSource,
 		PhotoHash:       c.PhotoHash,
+		ContentSHA:      c.ContentSHA,
 		TS:              ts,
 	}); err != nil {
 		log.Printf("[detect] запись сообщения: %v", err)

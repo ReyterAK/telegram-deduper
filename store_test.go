@@ -222,6 +222,32 @@ func TestFindPhotoDuplicateTypeFilter(t *testing.T) {
 	}
 }
 
+func TestFindContentDuplicate(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+	const shaA = "aaaa" + "11111111111111111111111111111111"
+	const shaB = "bbbb" + "22222222222222222222222222222222"
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, MediaType: MediaTypeDocument, ContentSHA: shaA, TS: now})
+
+	// same content hash → duplicate
+	m, err := st.FindContentDuplicate(chat, now-86400, shaA)
+	if err != nil || m == nil || m.MsgID != 1 {
+		t.Fatalf("content hash match failed: %+v err=%v", m, err)
+	}
+	// different hash → no match
+	m, err = st.FindContentDuplicate(chat, now-86400, shaB)
+	if err != nil || m != nil {
+		t.Fatalf("different hash must not match: %+v err=%v", m, err)
+	}
+	// empty hash never matches
+	m, err = st.FindContentDuplicate(chat, now-86400, "")
+	if err != nil || m != nil {
+		t.Fatalf("empty hash must not match: %+v err=%v", m, err)
+	}
+}
+
 func TestWarningsLifecycle(t *testing.T) {
 	st := newTestStore(t)
 	chat := int64(-100123)
