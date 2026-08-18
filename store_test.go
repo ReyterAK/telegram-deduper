@@ -136,6 +136,33 @@ func TestRetentionCleanup(t *testing.T) {
 	}
 }
 
+func TestUpdateMessageAfterEdit(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, NormText: "старый текст", TS: now})
+
+	dups, _ := st.FindDuplicates(chat, now-86400, "старый текст", "", "", 9)
+	if len(dups) != 1 {
+		t.Fatal("expected match before edit")
+	}
+
+	// edit: the stored content changes to the new text
+	if err := st.UpdateMessage(StoredMessage{ChatID: chat, MsgID: 1, NormText: "новый текст"}); err != nil {
+		t.Fatal(err)
+	}
+
+	dups, _ = st.FindDuplicates(chat, now-86400, "старый текст", "", "", 9)
+	if len(dups) != 0 {
+		t.Fatal("old text must not match after edit")
+	}
+	dups, _ = st.FindDuplicates(chat, now-86400, "новый текст", "", "", 9)
+	if len(dups) != 1 {
+		t.Fatal("new text must match after edit")
+	}
+}
+
 func TestWarningsLifecycle(t *testing.T) {
 	st := newTestStore(t)
 	chat := int64(-100123)

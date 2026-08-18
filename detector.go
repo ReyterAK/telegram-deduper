@@ -220,6 +220,32 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	d.react(c, classify(c.HasURL, c.ForwardExternal), cat, dups[0], now)
 }
 
+// ProcessEdited refreshes the stored content of an edited message
+// so later duplicate checks use the CURRENT text: a primary that was
+// edited to different content no longer matches the old text. Edited
+// messages do not themselves trigger duplicate detection.
+func (d *Detector) ProcessEdited(m *tgbotapi.Message) {
+	if m == nil || m.Chat == nil {
+		return
+	}
+	chatID := m.Chat.ID
+	if chatID != d.chatID {
+		return
+	}
+	c := extractContent(m, chatID)
+	if err := d.st.UpdateMessage(StoredMessage{
+		ChatID:          chatID,
+		MsgID:           m.MessageID,
+		NormText:        c.NormText,
+		HasURL:          c.HasURL,
+		MediaUID:        c.MediaUID,
+		ForwardExternal: c.ForwardExternal,
+		FwdSource:       c.FwdSource,
+	}); err != nil {
+		log.Printf("[detect] обновление изменённого сообщения: %v", err)
+	}
+}
+
 func (d *Detector) store(c MsgContent, ts int64) {
 	if err := d.st.AddMessage(StoredMessage{
 		ChatID:          c.ChatID,

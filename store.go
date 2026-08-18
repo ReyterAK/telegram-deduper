@@ -122,6 +122,16 @@ func (s *Store) AddMessage(m StoredMessage) error {
 	return err
 }
 
+// UpdateMessage refreshes the comparable content of an existing
+// message (used when a message is edited).
+func (s *Store) UpdateMessage(m StoredMessage) error {
+	_, err := s.db.Exec(
+		`UPDATE messages SET norm_text = ?, has_url = ?, media_uid = ?, forward_external = ?, fwd_source = ?
+		 WHERE chat_id = ? AND msg_id = ?`,
+		m.NormText, b2i(m.HasURL), m.MediaUID, b2i(m.ForwardExternal), m.FwdSource, m.ChatID, m.MsgID)
+	return err
+}
+
 // FindDuplicates returns stored messages from the window that match
 // the incoming message: the same normalized text, the same media
 // file_unique_id, or the same forward source. Ordered oldest first

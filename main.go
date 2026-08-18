@@ -92,6 +92,9 @@ func main() {
 			if update.Message != nil {
 				det.Process(update.Message)
 			}
+			if update.EditedMessage != nil {
+				det.ProcessEdited(update.EditedMessage)
+			}
 		}
 	}
 }

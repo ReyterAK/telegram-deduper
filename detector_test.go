@@ -155,15 +155,6 @@ func TestExtractContentForwardSourceLink(t *testing.T) {
 	}
 }
 
-func TestDeletedMessageText(t *testing.T) {
-	if got := deletedMessageText(DupTypeLink, "https://t.me/c/100/5"); got != "Удален дубль ссылки в сообщении https://t.me/c/100/5" {
-		t.Fatalf("with link: %q", got)
-	}
-	if got := deletedMessageText(DupTypeLink, ""); got != "Удалена пересылка из внешнего источника" {
-		t.Fatalf("without link: %q", got)
-	}
-}
-
 func TestMessageLink(t *testing.T) {
 	if got := messageLink(-1004307533132, 5, "mychat"); got != "https://t.me/mychat/5" {
 		t.Fatalf("username link = %q", got)

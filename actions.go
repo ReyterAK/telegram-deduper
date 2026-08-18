@@ -29,13 +29,6 @@ func commentTemplate(typ DupType) string {
 	return "Дубль сообщения %s"
 }
 
-func deletedTemplate(typ DupType) string {
-	if typ == DupTypeLink {
-		return "Удален дубль ссылки в сообщении %s"
-	}
-	return "Удален дубль сообщения %s"
-}
-
 // messageLink builds a clickable t.me link to a message.
 func messageLink(chatID int64, msgID int, chatUsername string) string {
 	if chatUsername != "" {
@@ -93,14 +86,6 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 	reaction := d.reactionFor(typ, cat)
 	link := messageLink(c.ChatID, c.MsgID, d.chatUsername)
 
-	// Link for the delete notice: the in-chat original when one
-	// exists; otherwise fall back to the forward's source post;
-	// with no link the notice degrades to plain text.
-	origLink := c.SourceLink
-	if original.MsgID > 0 {
-		origLink = messageLink(c.ChatID, original.MsgID, d.chatUsername)
-	}
-
 	switch reaction {
 	case ReactionIgnore:
 		return
@@ -118,30 +103,26 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 		d.scheduleAutoDelete(sent)
 
 	case ReactionDelete:
+		// 1) Post the notice as a REPLY to the original first: the
+		// quoted content shows which message was duplicated. If the
+		// original is gone (reply fails: message not found), the
+		// repeat is ALLOWED — it becomes the new original.
+		text := withAuthor(deletedShortText(typ), c.AuthorName)
+		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
+		notice := tgbotapi.NewMessage(c.ChatID, text)
+		notice.ReplyToMessageID = original.MsgID
+		sent, err := d.bot.Send(notice)
+		if err != nil {
+			log.Printf("[action] ответ на оригинал не прошёл (%v) — повтор разрешён", err)
+			return
+		}
+		d.scheduleAutoDelete(sent)
+
+		// 2) Delete the duplicate.
 		if _, err := d.bot.Request(tgbotapi.NewDeleteMessage(c.ChatID, c.MsgID)); err != nil {
 			log.Printf("[action] удаление дубля: %v", err)
 			return
 		}
-		text := withAuthor(deletedShortText(typ), c.AuthorName)
-		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
-
-		// Post the notice as a REPLY to the original message, so the
-		// quoted content shows which message was duplicated.
-		msg := tgbotapi.NewMessage(c.ChatID, text)
-		msg.ReplyToMessageID = original.MsgID
-		sent, err := d.bot.Send(msg)
-		if err != nil && original.MsgID > 0 {
-			// Reply failed (original gone?) → standalone with a link.
-			log.Printf("[action] ответ на оригинал не прошёл (%v), шлю со ссылкой", err)
-			fallback := withAuthor(deletedMessageText(typ, origLink), c.AuthorName)
-			fallback = d.appendWarningLine(fallback, c.ChatID, c.UserID, cat, now)
-			sent, err = d.bot.Send(tgbotapi.NewMessage(c.ChatID, fallback))
-		}
-		if err != nil {
-			log.Printf("[action] уведомление об удалении: %v", err)
-			return
-		}
-		d.scheduleAutoDelete(sent)
 	}
 
 	// Warning accounting happens for comment/delete reactions only.
@@ -155,15 +136,6 @@ func deletedShortText(typ DupType) string {
 		return "Удален дубль ссылки"
 	}
 	return "Удален дубль сообщения"
-}
-
-// deletedMessageText builds the delete notice; without a link the
-// message degrades to a plain statement.
-func deletedMessageText(typ DupType, link string) string {
-	if link == "" {
-		return "Удалена пересылка из внешнего источника"
-	}
-	return fmt.Sprintf(deletedTemplate(typ), link)
 }
 
 // appendWarningLine appends the current warning count when warnings
