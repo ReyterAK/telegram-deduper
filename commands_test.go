@@ -41,6 +41,12 @@ func TestLabels(t *testing.T) {
 	if got := banTypeLabelShort("readonly"); got != "только чтение" {
 		t.Fatalf("readonly = %q", got)
 	}
+	if got := deletedOriginalLabel(DeletedOriginalAllow); got != "пропускать" {
+		t.Fatalf("allow = %q", got)
+	}
+	if got := deletedOriginalLabel(DeletedOriginalStrict); got != "строгая" {
+		t.Fatalf("strict = %q", got)
+	}
 }
 
 func TestSetReaction(t *testing.T) {

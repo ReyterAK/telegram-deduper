@@ -70,6 +70,17 @@ func TestConfigValidationErrors(t *testing.T) {
 	if cfg.PhotoMode != PhotoModePerceptual {
 		t.Fatalf("invalid photo mode must fall back to perceptual, got %q", cfg.PhotoMode)
 	}
+	cfg = DefaultConfig()
+	if cfg.DeletedOriginalPolicy != DeletedOriginalStrict {
+		t.Fatalf("deleted-original policy default = %q", cfg.DeletedOriginalPolicy)
+	}
+	cfg.DeletedOriginalPolicy = "bogus"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if cfg.DeletedOriginalPolicy != DeletedOriginalStrict {
+		t.Fatalf("invalid policy must fall back to strict, got %q", cfg.DeletedOriginalPolicy)
+	}
 }
 
 func TestConfigRoundTrip(t *testing.T) {

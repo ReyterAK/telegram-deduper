@@ -81,13 +81,25 @@ type Config struct {
 	// PhotoMode: "exact" (file_unique_id), "perceptual" (dHash),
 	// "off" (photos are not compared).
 	PhotoMode string `json:"photo_mode"`
+	// DeletedOriginalPolicy: what happens when a duplicate is found
+	// but the original message is gone from the chat.
+	// "allow"  — the repeat is allowed (becomes the new original).
+	// "strict" — flagged content stays flagged for the window: the
+	// repeat is deleted anyway.
+	DeletedOriginalPolicy string `json:"deleted_original_policy"`
 }
 
 // Photo mode values.
 const (
-	PhotoModeExact       = "exact"
-	PhotoModePerceptual  = "perceptual"
-	PhotoModeOff         = "off"
+	PhotoModeExact      = "exact"
+	PhotoModePerceptual = "perceptual"
+	PhotoModeOff        = "off"
+)
+
+// Deleted-original policy values.
+const (
+	DeletedOriginalAllow  = "allow"
+	DeletedOriginalStrict = "strict"
 )
 
 // DefaultConfig returns the built-in defaults.
@@ -124,6 +136,8 @@ func DefaultConfig() *Config {
 		},
 		AutoDeleteHours: 0,
 		PhotoMode:       PhotoModePerceptual,
+		// Strict by default: once-flagged content stays flagged.
+		DeletedOriginalPolicy: DeletedOriginalStrict,
 	}
 }
 
@@ -203,6 +217,12 @@ func (c *Config) validate() error {
 	default:
 		log.Printf("[config] photo_mode=%q неизвестен, установлено %q", c.PhotoMode, PhotoModePerceptual)
 		c.PhotoMode = PhotoModePerceptual
+	}
+	switch c.DeletedOriginalPolicy {
+	case DeletedOriginalAllow, DeletedOriginalStrict:
+	default:
+		log.Printf("[config] deleted_original_policy=%q неизвестна, установлено %q", c.DeletedOriginalPolicy, DeletedOriginalStrict)
+		c.DeletedOriginalPolicy = DeletedOriginalStrict
 	}
 	return nil
 }

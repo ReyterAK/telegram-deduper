@@ -103,17 +103,31 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 		d.scheduleAutoDelete(sent)
 
 	case ReactionDelete:
-		// 1) Post the notice as a REPLY to the original first: the
-		// quoted content shows which message was duplicated. If the
-		// original is gone (reply fails: message not found), the
-		// repeat is ALLOWED — it becomes the new original.
 		text := withAuthor(deletedShortText(typ), c.AuthorName)
 		text = d.appendWarningLine(text, c.ChatID, c.UserID, cat, now)
+
+		// 1) Post the notice as a REPLY to the original first: the
+		// quoted content shows which message was duplicated.
 		notice := tgbotapi.NewMessage(c.ChatID, text)
 		notice.ReplyToMessageID = original.MsgID
 		sent, err := d.bot.Send(notice)
 		if err != nil {
-			log.Printf("[action] ответ на оригинал не прошёл (%v) — повтор разрешён", err)
+			// Original is gone (message to be replied not found) or a
+			// transient error. Policy decides whether the repeat stands.
+			if d.cfg.DeletedOriginalPolicy != DeletedOriginalStrict {
+				log.Printf("[action] ответ на оригинал не прошёл (%v) — повтор разрешён (allow)", err)
+				return
+			}
+			log.Printf("[action] ответ на оригинал не прошёл (%v) — строгая политика: дубль удаляется", err)
+			if _, derr := d.bot.Request(tgbotapi.NewDeleteMessage(c.ChatID, c.MsgID)); derr != nil {
+				log.Printf("[action] удаление дубля: %v", derr)
+				return
+			}
+			// Standalone notice without a reply (no dead link).
+			if s2, err2 := d.bot.Send(tgbotapi.NewMessage(c.ChatID, text)); err2 == nil {
+				d.scheduleAutoDelete(s2)
+			}
+			d.warnAndMaybeBan(c.ChatID, c.UserID, cat, now, c.AuthorName)
 			return
 		}
 		d.scheduleAutoDelete(sent)

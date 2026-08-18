@@ -154,12 +154,20 @@ func photoModeLabel(mode string) string {
 	return mode
 }
 
+func deletedOriginalLabel(p string) string {
+	if p == DeletedOriginalAllow {
+		return "пропускать"
+	}
+	return "строгая"
+}
+
 func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 	c := d.cfg
 	text := "Настройки Антидубля\n\n" +
 		"Период слежения: " + strconv.Itoa(c.RetentionDays) + " сут — повтор сообщения\n" +
 		"в течение этого срока считается дублем.\n" +
 		"Картинки: " + photoModeLabel(c.PhotoMode) + "\n" +
+		"Удалённый оригинал: " + deletedOriginalLabel(c.DeletedOriginalPolicy) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(c.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -180,6 +188,11 @@ func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 			btn("по ID", "photo:"+PhotoModeExact),
 			btn("по содержимому", "photo:"+PhotoModePerceptual),
 			btn("выкл", "photo:"+PhotoModeOff),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Удалённый оригинал: "+deletedOriginalLabel(c.DeletedOriginalPolicy), "delpol:view"),
+			btn("Пропускать", "delpol:"+DeletedOriginalAllow),
+			btn("Строгая", "delpol:"+DeletedOriginalStrict),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Автоудаление: "+autoDeleteLabel(c.AutoDeleteHours), "ad:view"),
@@ -323,6 +336,14 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		case "-1":
 			d.cfg.AutoDeleteHours = clamp(d.cfg.AutoDeleteHours-1, 0, maxAuto)
 			changed = true
+		}
+	case "delpol":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case DeletedOriginalAllow, DeletedOriginalStrict:
+				d.cfg.DeletedOriginalPolicy = parts[1]
+				changed = true
+			}
 		}
 	case "photo":
 		if len(parts) == 2 {
