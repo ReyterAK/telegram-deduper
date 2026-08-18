@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,10 +60,12 @@ type Detector struct {
 	bot        *tgbotapi.BotAPI
 	configPath string
 
-	settings map[int64]*Settings
-	chatName map[int64]string
+	settings  map[int64]*Settings
+	chatName  map[int64]string
 	chatAdmin map[int64]bool
-	pending  map[int64]pendingInput
+	pending   map[int64]pendingInput
+	// foreignNotified remembers chats that were reported to the owner.
+	foreignNotified map[int64]bool
 }
 
 // pendingInput remembers a text-value request until the user replies.
@@ -79,10 +82,47 @@ func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string
 		st:         st,
 		bot:        bot,
 		configPath: configPath,
-		settings:   map[int64]*Settings{},
-		chatName:   map[int64]string{},
-		chatAdmin:  map[int64]bool{},
-		pending:    map[int64]pendingInput{},
+		settings:        map[int64]*Settings{},
+		chatName:        map[int64]string{},
+		chatAdmin:       map[int64]bool{},
+		pending:         map[int64]pendingInput{},
+		foreignNotified: map[int64]bool{},
+	}
+}
+
+// isAllowed reports whether the bot may serve this chat (allowlist).
+// An empty allowlist permits every chat where the bot is an admin.
+func (d *Detector) isAllowed(chatID int64) bool {
+	if len(d.cfg.AllowedChats) == 0 {
+		return true
+	}
+	for _, id := range d.cfg.AllowedChats {
+		if id == chatID {
+			return true
+		}
+	}
+	return false
+}
+
+// notifyForeign tells the owner (first allowed chat) once per foreign
+// chat that the bot was added there but is not enabled.
+func (d *Detector) notifyForeign(chatID int64, title string) {
+	if d.foreignNotified[chatID] {
+		return
+	}
+	d.foreignNotified[chatID] = true
+	name := title
+	if name == "" {
+		name = strconv.FormatInt(chatID, 10)
+	}
+	log.Printf("[chat] бота добавили в чат %q (%d) — не в списке разрешённых, игнорируется", name, chatID)
+	if len(d.cfg.AllowedChats) > 0 {
+		target := d.cfg.AllowedChats[0]
+		_, err := d.bot.Send(tgbotapi.NewMessage(target,
+			fmt.Sprintf("Бота добавили в чат «%s» (id %d).\nРазрешить: добавить %d в allowed_chats.", name, chatID, chatID)))
+		if err != nil {
+			log.Printf("[chat] уведомление владельцу: %v", err)
+		}
 	}
 }
 
@@ -277,6 +317,12 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 
 	chatID := m.Chat.ID
 
+	// Serve only allowed chats (empty allowlist = any admin chat).
+	if !d.isAllowed(chatID) {
+		d.notifyForeign(chatID, m.Chat.Title)
+		return
+	}
+
 	// Engage only chats where the bot is an administrator.
 	if !d.botAdmin(chatID) {
 		return
@@ -364,6 +410,9 @@ func (d *Detector) ProcessEdited(m *tgbotapi.Message) {
 		return
 	}
 	chatID := m.Chat.ID
+	if !d.isAllowed(chatID) {
+		return
+	}
 	if !d.botAdmin(chatID) {
 		return
 	}

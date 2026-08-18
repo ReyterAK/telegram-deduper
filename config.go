@@ -90,6 +90,10 @@ type Config struct {
 	// remembered but not reacted to (backlog after downtime).
 	// 0 = react to everything.
 	FreshnessMinutes int `json:"freshness_minutes"`
+	// AllowedChats: chat ids the bot may serve. Empty = any chat
+	// where the bot is an administrator. When non-empty, other chats
+	// are ignored and the owner is notified in the first allowed chat.
+	AllowedChats []int64 `json:"allowed_chats"`
 }
 
 // Freshness bounds.

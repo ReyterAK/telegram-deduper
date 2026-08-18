@@ -150,6 +150,10 @@ func (d *Detector) showStatus(m *tgbotapi.Message) {
 }
 
 func (d *Detector) showSettingsMenu(m *tgbotapi.Message) {
+	if !d.isAllowed(m.Chat.ID) {
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, "Бот не активен в этом чате."))
+		return
+	}
 	if !d.isAdmin(m.Chat.ID, m.From.ID) {
 		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, "Только для админов чата"))
 		return

@@ -206,6 +206,25 @@ func TestSettingsFreshnessMigration(t *testing.T) {
 	}
 }
 
+func TestIsAllowed(t *testing.T) {
+	// empty allowlist → any chat allowed
+	d := &Detector{cfg: DefaultConfig()}
+	if !d.isAllowed(-1001) {
+		t.Fatal("empty allowlist must allow any chat")
+	}
+
+	// non-empty allowlist → only listed chats
+	cfg := DefaultConfig()
+	cfg.AllowedChats = []int64{-1001, -1002}
+	d = &Detector{cfg: cfg}
+	if !d.isAllowed(-1001) || !d.isAllowed(-1002) {
+		t.Fatal("listed chats must be allowed")
+	}
+	if d.isAllowed(-1003) {
+		t.Fatal("unlisted chat must be denied")
+	}
+}
+
 func TestPerChatSettings(t *testing.T) {
 	st := newTestStore(t)
 	d := NewDetector(DefaultConfig(), st, nil, "")
