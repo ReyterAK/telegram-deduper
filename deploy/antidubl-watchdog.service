@@ -1,0 +1,6 @@
+[Unit]
+Description=Antidubl watchdog check
+
+[Service]
+Type=oneshot
+ExecStart=/opt/antidubl/antidubl-watchdog.sh

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -66,6 +67,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	// Heartbeat for the systemd watchdog (antidubl-watchdog.timer):
+	// a fresh timestamp file every minute proves the poller goroutine
+	// is alive. A stale file means the process is stuck, not crashed
+	// (crashes are handled by Restart=on-failure).
+	heartbeatPath := envOr("ANTIDUBL_HEARTBEAT", filepath.Join(filepath.Dir(configPath), "heartbeat"))
+	go heartbeatLoop(ctx, heartbeatPath)
+
 	go det.autoDeleteLoop(ctx)
 	go retentionLoop(ctx, st, cfg)
 
@@ -100,6 +108,34 @@ func main() {
 			if update.CallbackQuery != nil {
 				det.HandleCallback(update.CallbackQuery)
 			}
+		}
+	}
+}
+
+// heartbeatLoop writes the current unix timestamp to the heartbeat
+// file every minute (atomically: temp + rename, so the watchdog
+// never reads a partially written file).
+func heartbeatLoop(ctx context.Context, path string) {
+	write := func() {
+		ts := strconv.FormatInt(time.Now().Unix(), 10)
+		tmp := path + ".tmp"
+		if err := os.WriteFile(tmp, []byte(ts), 0o644); err != nil {
+			log.Printf("[heartbeat] запись %s: %v", tmp, err)
+			return
+		}
+		if err := os.Rename(tmp, path); err != nil {
+			log.Printf("[heartbeat] rename %s: %v", path, err)
+		}
+	}
+	write() // immediate beat on start
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			write()
 		}
 	}
 }
