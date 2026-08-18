@@ -142,11 +142,24 @@ func btn(text, data string) tgbotapi.InlineKeyboardButton {
 	return tgbotapi.NewInlineKeyboardButtonData(text, data)
 }
 
+func photoModeLabel(mode string) string {
+	switch mode {
+	case PhotoModeExact:
+		return "по ID"
+	case PhotoModePerceptual:
+		return "по содержимому"
+	case PhotoModeOff:
+		return "выкл"
+	}
+	return mode
+}
+
 func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 	c := d.cfg
 	text := "Настройки Антидубля\n\n" +
 		"Период слежения: " + strconv.Itoa(c.RetentionDays) + " сут — повтор сообщения\n" +
 		"в течение этого срока считается дублем.\n" +
+		"Картинки: " + photoModeLabel(c.PhotoMode) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(c.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -161,6 +174,12 @@ func (d *Detector) mainMenu() (string, tgbotapi.InlineKeyboardMarkup) {
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Предупреждения: один участник", "m:warn:"+string(CatSameParticipant)),
 			btn("Предупреждения: разные", "m:warn:"+string(CatDiffParticipant)),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Картинки: "+photoModeLabel(c.PhotoMode), "photo:view"),
+			btn("по ID", "photo:"+PhotoModeExact),
+			btn("по содержимому", "photo:"+PhotoModePerceptual),
+			btn("выкл", "photo:"+PhotoModeOff),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Автоудаление: "+autoDeleteLabel(c.AutoDeleteHours), "ad:view"),
@@ -304,6 +323,14 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		case "-1":
 			d.cfg.AutoDeleteHours = clamp(d.cfg.AutoDeleteHours-1, 0, maxAuto)
 			changed = true
+		}
+	case "photo":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
+				d.cfg.PhotoMode = parts[1]
+				changed = true
+			}
 		}
 	case "r":
 		// r:<type>:<cat>:<reaction>

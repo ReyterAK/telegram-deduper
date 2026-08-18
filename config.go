@@ -78,7 +78,17 @@ type Config struct {
 	Reactions       Reactions `json:"reactions"`
 	Warnings        Warnings  `json:"warnings"`
 	AutoDeleteHours int     `json:"auto_delete_hours"` // 0 = off
+	// PhotoMode: "exact" (file_unique_id), "perceptual" (dHash),
+	// "off" (photos are not compared).
+	PhotoMode string `json:"photo_mode"`
 }
+
+// Photo mode values.
+const (
+	PhotoModeExact       = "exact"
+	PhotoModePerceptual  = "perceptual"
+	PhotoModeOff         = "off"
+)
 
 // DefaultConfig returns the built-in defaults.
 func DefaultConfig() *Config {
@@ -113,6 +123,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		AutoDeleteHours: 0,
+		PhotoMode:       PhotoModePerceptual,
 	}
 }
 
@@ -186,6 +197,12 @@ func (c *Config) validate() error {
 	if c.AutoDeleteHours < 0 || c.AutoDeleteHours > maxAuto {
 		log.Printf("[config] auto_delete_hours=%d вне 0..%d, выключено", c.AutoDeleteHours, maxAuto)
 		c.AutoDeleteHours = 0
+	}
+	switch c.PhotoMode {
+	case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
+	default:
+		log.Printf("[config] photo_mode=%q неизвестен, установлено %q", c.PhotoMode, PhotoModePerceptual)
+		c.PhotoMode = PhotoModePerceptual
 	}
 	return nil
 }

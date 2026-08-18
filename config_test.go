@@ -59,6 +59,17 @@ func TestConfigValidationErrors(t *testing.T) {
 	if err := cfg.validate(); err == nil {
 		t.Error("invalid ban_type must fail validation")
 	}
+	cfg = DefaultConfig()
+	if cfg.PhotoMode != PhotoModePerceptual {
+		t.Fatalf("photo mode default = %q", cfg.PhotoMode)
+	}
+	cfg.PhotoMode = "bogus"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if cfg.PhotoMode != PhotoModePerceptual {
+		t.Fatalf("invalid photo mode must fall back to perceptual, got %q", cfg.PhotoMode)
+	}
 }
 
 func TestConfigRoundTrip(t *testing.T) {

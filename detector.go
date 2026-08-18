@@ -43,6 +43,9 @@ type MsgContent struct {
 	// SourceLink points at the original post for external forwards
 	// ("" when the source is unknown).
 	SourceLink string
+	// PhotoHash is the perceptual dHash of a photo message ("" when
+	// not computed).
+	PhotoHash string
 }
 
 // Detector wires store + telegram into the duplicate pipeline.
@@ -220,6 +223,25 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	if err != nil {
 		log.Printf("[detect] поиск дублей: %v", err)
 	}
+
+	// Perceptual photo match: when the exact file match found
+	// nothing and photo comparison by content is enabled, download
+	// the image and compare its dHash against the window.
+	if len(dups) == 0 && d.cfg.PhotoMode == PhotoModePerceptual &&
+		c.MediaUID != "" && len(m.Photo) > 0 {
+		if ph, err := d.photoHash(m); err != nil {
+			log.Printf("[photo] хеш фотографии: %v", err)
+		} else {
+			c.PhotoHash = ph
+			if pm, err := d.st.FindPhotoDuplicate(chatID, window, ph, PhotoHashThreshold); err != nil {
+				log.Printf("[photo] поиск по содержимому: %v", err)
+			} else if pm != nil {
+				log.Printf("[photo] фото совпало по содержимому с msg %d (hamming ≤ %d)", pm.MsgID, PhotoHashThreshold)
+				dups = []StoredMessage{*pm}
+			}
+		}
+	}
+
 	d.store(c, now.Unix())
 
 	if len(dups) == 0 {
@@ -272,6 +294,7 @@ func (d *Detector) store(c MsgContent, ts int64) {
 		MediaUID:        c.MediaUID,
 		ForwardExternal: c.ForwardExternal,
 		FwdSource:       c.FwdSource,
+		PhotoHash:       c.PhotoHash,
 		TS:              ts,
 	}); err != nil {
 		log.Printf("[detect] запись сообщения: %v", err)

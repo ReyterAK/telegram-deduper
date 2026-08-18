@@ -10,6 +10,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"time"
 
@@ -27,6 +28,7 @@ type StoredMessage struct {
 	MediaUID        string
 	ForwardExternal bool
 	FwdSource       string
+	PhotoHash       string
 	TS              int64
 }
 
@@ -50,6 +52,7 @@ CREATE TABLE IF NOT EXISTS messages (
 	media_uid TEXT NOT NULL DEFAULT '',
 	forward_external INTEGER NOT NULL DEFAULT 0,
 	fwd_source TEXT NOT NULL DEFAULT '',
+	media_phash TEXT NOT NULL DEFAULT '',
 	ts INTEGER NOT NULL,
 	UNIQUE(chat_id, msg_id)
 );
@@ -88,13 +91,19 @@ func OpenStore(path string) (*Store, error) {
 	rows, err := db.Query(`PRAGMA table_info(messages)`)
 	if err == nil {
 		hasFwd := false
+		hasPhash := false
 		for rows.Next() {
 			var cid int
 			var name, ctype string
 			var notnull, pk int
 			var dflt any
-			if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil && name == "fwd_source" {
-				hasFwd = true
+			if rows.Scan(&cid, &name, &ctype, &notnull, &dflt, &pk) == nil {
+				switch name {
+				case "fwd_source":
+					hasFwd = true
+				case "media_phash":
+					hasPhash = true
+				}
 			}
 		}
 		rows.Close()
@@ -102,6 +111,12 @@ func OpenStore(path string) (*Store, error) {
 			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN fwd_source TEXT NOT NULL DEFAULT ''`); err != nil {
 				_ = db.Close()
 				return nil, fmt.Errorf("migrate db (fwd_source): %w", err)
+			}
+		}
+		if !hasPhash {
+			if _, err := db.Exec(`ALTER TABLE messages ADD COLUMN media_phash TEXT NOT NULL DEFAULT ''`); err != nil {
+				_ = db.Close()
+				return nil, fmt.Errorf("migrate db (media_phash): %w", err)
 			}
 		}
 	}
@@ -116,10 +131,58 @@ func (s *Store) Close() error { return s.db.Close() }
 
 func (s *Store) AddMessage(m StoredMessage) error {
 	_, err := s.db.Exec(
-		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, ts)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, b2i(m.ForwardExternal), m.FwdSource, m.TS)
+		`INSERT OR IGNORE INTO messages (chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, media_phash, ts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		m.ChatID, m.MsgID, m.UserID, m.NormText, b2i(m.HasURL), m.MediaUID, b2i(m.ForwardExternal), m.FwdSource, m.PhotoHash, m.TS)
 	return err
+}
+
+// FindPhotoDuplicate scans the window for a stored photo whose dHash
+// is within the Hamming threshold; the oldest match wins. Returns
+// nil when nothing is close enough.
+func (s *Store) FindPhotoDuplicate(chatID int64, since int64, phash string, threshold int) (*StoredMessage, error) {
+	needle, err := hex.DecodeString(phash)
+	if err != nil || len(needle) != 8 {
+		return nil, nil
+	}
+	var want uint64
+	for i := range 8 {
+		want |= uint64(needle[i]) << (8 * uint(7-i))
+	}
+
+	rows, err := s.db.Query(
+		`SELECT chat_id, msg_id, user_id, norm_text, has_url, media_uid, forward_external, fwd_source, media_phash, ts
+		 FROM messages
+		 WHERE chat_id = ? AND ts >= ? AND media_phash != ''
+		 ORDER BY ts ASC, id ASC
+		 LIMIT 500`, chatID, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var m StoredMessage
+		var hasURL, fe int
+		if err := rows.Scan(&m.ChatID, &m.MsgID, &m.UserID, &m.NormText, &hasURL, &m.MediaUID, &fe, &m.FwdSource, &m.PhotoHash, &m.TS); err != nil {
+			return nil, err
+		}
+		m.HasURL = hasURL != 0
+		m.ForwardExternal = fe != 0
+
+		raw, err := hex.DecodeString(m.PhotoHash)
+		if err != nil || len(raw) != 8 {
+			continue
+		}
+		var got uint64
+		for i := range 8 {
+			got |= uint64(raw[i]) << (8 * uint(7-i))
+		}
+		if hamming(got, want) <= threshold {
+			return &m, nil
+		}
+	}
+	return nil, rows.Err()
 }
 
 // UpdateMessage refreshes the comparable content of an existing

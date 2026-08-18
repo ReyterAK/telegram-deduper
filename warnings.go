@@ -74,6 +74,20 @@ func (d *Detector) warnAndMaybeBan(chatID, userID int64, cat DupCategory, now ti
 	}
 	if err2 != nil {
 		log.Printf("[warn] бан пользователя %d (%s %d сут): %v", userID, ws.BanType, ws.BanDays, err2)
+		// Unbannable target (chat owner, missing rights, API error):
+		// inform the chat and reset the counter so it does not
+		// accumulate forever against an unbannable user.
+		name := authorName
+		if name == "" {
+			name = strconv.FormatInt(userID, 10)
+		}
+		notice := fmt.Sprintf("Не удалось применить бан для %s: %v", name, err2)
+		if sent, err := d.bot.Send(tgbotapi.NewMessage(chatID, notice)); err == nil {
+			d.scheduleAutoDelete(sent)
+		}
+		if err := d.st.ResetWarnings(chatID, userID); err != nil {
+			log.Printf("[warn] сброс предупреждений после ошибки бана: %v", err)
+		}
 		return
 	}
 

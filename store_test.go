@@ -163,6 +163,30 @@ func TestUpdateMessageAfterEdit(t *testing.T) {
 	}
 }
 
+func TestFindPhotoDuplicate(t *testing.T) {
+	st := newTestStore(t)
+	chat := int64(-100123)
+	now := nowUnix()
+
+	st.AddMessage(StoredMessage{ChatID: chat, MsgID: 1, UserID: 10, PhotoHash: "ffffffffffffffff", TS: now})
+
+	// exact same hash → duplicate
+	m, err := st.FindPhotoDuplicate(chat, now-86400, "ffffffffffffffff", PhotoHashThreshold)
+	if err != nil || m == nil || m.MsgID != 1 {
+		t.Fatalf("exact hash match failed: %+v err=%v", m, err)
+	}
+	// one bit off → still a duplicate (within threshold)
+	m, err = st.FindPhotoDuplicate(chat, now-86400, "fffffffeffffffff", PhotoHashThreshold)
+	if err != nil || m == nil {
+		t.Fatalf("near hash must match: %+v err=%v", m, err)
+	}
+	// all bits different → no duplicate
+	m, err = st.FindPhotoDuplicate(chat, now-86400, "0000000000000000", PhotoHashThreshold)
+	if err != nil || m != nil {
+		t.Fatalf("far hash must not match: %+v err=%v", m, err)
+	}
+}
+
 func TestWarningsLifecycle(t *testing.T) {
 	st := newTestStore(t)
 	chat := int64(-100123)
