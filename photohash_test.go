@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"image"
 	"image/color"
-	"math/rand"
+	"image/png"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -42,11 +44,11 @@ func solidImage(v uint8) *image.Gray {
 }
 
 func noiseImage(size int, seed int64) *image.Gray {
-	rng := rand.New(rand.NewSource(seed))
+	rng := rand.New(rand.NewPCG(uint64(seed), uint64(seed)))
 	img := image.NewGray(image.Rect(0, 0, size, size))
 	for y := range size {
 		for x := range size {
-			img.SetGray(x, y, color.Gray{Y: uint8(rng.Intn(256))})
+			img.SetGray(x, y, color.Gray{Y: uint8(rng.IntN(256))})
 		}
 	}
 	return img
@@ -88,6 +90,25 @@ func TestDHashDifferentImages(t *testing.T) {
 	}
 	if hamming(s, n) <= PhotoHashThreshold {
 		t.Fatal("solid and noise must differ")
+	}
+}
+
+func TestImageDecodeRegistered(t *testing.T) {
+	// Regression: image.Decode must know PNG/JPEG/GIF (blank imports).
+	var buf bytes.Buffer
+	img := gradientImage(32)
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	decoded, format, err := image.Decode(&buf)
+	if err != nil {
+		t.Fatalf("decoders not registered: %v", err)
+	}
+	if format != "png" {
+		t.Fatalf("format = %q", format)
+	}
+	if hamming(dHash(decoded), dHash(img)) != 0 {
+		t.Fatal("decode must preserve the perceptual hash")
 	}
 }
 

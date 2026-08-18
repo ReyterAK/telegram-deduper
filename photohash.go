@@ -17,6 +17,12 @@ import (
 	"math/bits"
 	"net/http"
 
+	// Register JPEG/PNG/GIF decoders; without these blank imports
+	// image.Decode fails with "image: unknown format".
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
+
 	"golang.org/x/image/draw"
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
