@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestClamp(t *testing.T) {
 	cases := []struct{ v, lo, hi, want int }{
@@ -133,6 +136,41 @@ func TestRouteMenuWarningsCategories(t *testing.T) {
 	text, _ = d.routeMenu([]string{"ret", "view"}, s)
 	if !contains(text, "Период слежения") {
 		t.Fatalf("main menu lost: %q", text)
+	}
+}
+
+// Regression: every "✏️" text-input button must carry a callback
+// data that the "in:" handler can resolve to a numeric field. The
+// warnings menu used to send "in:w:same_participant:thr" while the
+// fields were registered under "warn:..." — the callback split on
+// ':' into 4 parts and was silently dropped (no text input).
+func TestWarnInButtonsResolve(t *testing.T) {
+	d := &Detector{cfg: DefaultConfig()}
+	s := d.cfg.asSettings()
+	for _, cat := range []DupCategory{CatSameParticipant, CatDiffParticipant} {
+		_, kb := d.warningsMenu(cat, s)
+		found := 0
+		for _, row := range kb.InlineKeyboard {
+			for _, b := range row {
+				if b.CallbackData == nil || !strings.HasPrefix(*b.CallbackData, "in:") {
+					continue
+				}
+				found++
+				id := strings.TrimPrefix(*b.CallbackData, "in:")
+				if f := findNumericField(id); f == nil {
+					t.Fatalf("кнопка %q: поле %q не найдено (должно быть warn:%s:thr|life|days)",
+						b.Text, id, string(cat))
+				}
+				// the handler takes the whole payload after "in:" as
+				// the field id (ids contain colons themselves)
+				if !strings.HasPrefix(*b.CallbackData, "in:") || strings.TrimPrefix(*b.CallbackData, "in:") == "" {
+					t.Fatalf("callback %q: пустой id после in:", *b.CallbackData)
+				}
+			}
+		}
+		if found != 3 {
+			t.Fatalf("cat %s: ожидалось 3 кнопки ✏️, найдено %d", cat, found)
+		}
 	}
 }
 

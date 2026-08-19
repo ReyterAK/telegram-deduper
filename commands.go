@@ -230,8 +230,8 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("Реакции: сообщение", "m:react:message"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
-			btn("Предупреждения: один участник", "m:warn:"+string(CatSameParticipant)),
-			btn("Предупреждения: разные", "m:warn:"+string(CatDiffParticipant)),
+			btn("Бан: один участник", "m:warn:"+string(CatSameParticipant)),
+			btn("Бан: разные", "m:warn:"+string(CatDiffParticipant)),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Картинки: "+photoModeLabel(s.PhotoMode), "photo:view"),
@@ -319,6 +319,9 @@ func (d *Detector) warningsMenu(cat DupCategory, s *Settings) (string, tgbotapi.
 		name = "разных участников"
 	}
 	prefix := "w:" + string(cat)
+	// Text-input (✏️) callbacks carry the numericField id so the
+	// "in:" handler can resolve them: "warn:<cat>:<field>".
+	inPrefix := "warn:" + string(cat)
 	text := "Предупреждения (дубли от " + name + ")\n\n" +
 		"Порог: " + thresholdLabel(ws.Threshold) + "\n" +
 		"Срок жизни: " + strconv.Itoa(ws.LifetimeDays) + " сут\n" +
@@ -332,13 +335,13 @@ func (d *Detector) warningsMenu(cat DupCategory, s *Settings) (string, tgbotapi.
 			btn("выкл", prefix+":thr:off"),
 			btn("−", prefix+":thr:-1"),
 			btn("+", prefix+":thr:+1"),
-			btn("✏️", "in:"+prefix+":thr"),
+			btn("✏️", "in:"+inPrefix+":thr"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Срок жизни: "+strconv.Itoa(ws.LifetimeDays)+" сут", "noop"),
 			btn("−", prefix+":life:-1"),
 			btn("+", prefix+":life:+1"),
-			btn("✏️", "in:"+prefix+":life"),
+			btn("✏️", "in:"+inPrefix+":life"),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Тип бана: "+banTypeLabelShort(ws.BanType), "noop"),
@@ -349,7 +352,7 @@ func (d *Detector) warningsMenu(cat DupCategory, s *Settings) (string, tgbotapi.
 			btn("Срок бана: "+strconv.Itoa(ws.BanDays)+" сут", "noop"),
 			btn("−", prefix+":days:-1"),
 			btn("+", prefix+":days:+1"),
-			btn("✏️", "in:"+prefix+":days"),
+			btn("✏️", "in:"+inPrefix+":days"),
 		),
 		tgbotapi.NewInlineKeyboardRow(btn("← Назад", "m:main")),
 	)
@@ -415,14 +418,17 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 			changed = true
 		}
 	case "in":
-		if len(parts) == 2 && findNumericField(parts[1]) != nil {
+		// The field id may itself contain colons ("warn:<cat>:thr"),
+		// so the whole payload after "in:" is the id, not parts[1].
+		id := strings.TrimPrefix(cq.Data, "in:")
+		if id != "" && findNumericField(id) != nil {
 			d.pending[chatID] = pendingInput{
 				userID:    cq.From.ID,
-				field:     parts[1],
+				field:     id,
 				menuMsgID: msgID,
 				at:        time.Now(),
 			}
-			_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, inputPrompt(s, parts[1])))
+			_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, inputPrompt(s, id)))
 			_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
 			return
 		}

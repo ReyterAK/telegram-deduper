@@ -51,7 +51,7 @@ func (d *Detector) userBanned(chatID, userID int64) bool {
 		},
 	})
 	if err != nil {
-		log.Printf("[warn] getChatMember (%d): %v", userID, err)
+		log.Printf("[warn] getChatMember (%d) чат %d: %v", userID, chatID, err)
 		return false
 	}
 	return isBannedStatus(member.Status)
@@ -66,7 +66,7 @@ func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now tim
 	}
 	// Already banned/muted: no warnings, no repeated bans.
 	if d.userBanned(chatID, userID) {
-		log.Printf("[warn] пользователь %d уже ограничен — предупреждение не выносится", userID)
+		log.Printf("[warn] чат %d: пользователь %d уже ограничен — предупреждение не выносится", chatID, userID)
 		return
 	}
 
@@ -102,7 +102,7 @@ func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now tim
 		_, err2 = d.bot.Request(cfg)
 	}
 	if err2 != nil {
-		log.Printf("[warn] бан пользователя %d (%s %d сут): %v", userID, ws.BanType, ws.BanDays, err2)
+		log.Printf("[warn] чат %d: бан пользователя %d (%s %d сут): %v", chatID, userID, ws.BanType, ws.BanDays, err2)
 		// Unbannable target (chat owner, missing rights, API error):
 		// inform the chat and reset the counter so it does not
 		// accumulate forever against an unbannable user.
@@ -123,8 +123,8 @@ func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now tim
 	if err := d.st.ResetWarnings(chatID, userID); err != nil {
 		log.Printf("[warn] сброс предупреждений: %v", err)
 	}
-	log.Printf("[warn] пользователь %d: бан %s на %d суток (%d/%d предупреждений)",
-		userID, ws.BanType, ws.BanDays, count, ws.Threshold)
+	log.Printf("[warn] чат %d: пользователь %d: бан %s на %d суток (%d/%d предупреждений)",
+		chatID, userID, ws.BanType, ws.BanDays, count, ws.Threshold)
 
 	// Public ban notice with the offender's name.
 	name := authorName

@@ -467,27 +467,27 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 		c.MediaUID != "" {
 		threshold := mediaThreshold(c.MediaType)
 		if ph, err := d.mediaHash(m, c.MediaType); err != nil {
-			log.Printf("[media] хеш %s: %v", c.MediaType, err)
+			log.Printf("[media] чат %d: хеш %s: %v", chatID, c.MediaType, err)
 		} else {
 			c.PhotoHash = ph
 			if pm, minDist, err := d.st.FindPhotoDuplicate(chatID, window, c.MediaType, ph, threshold); err != nil {
-				log.Printf("[media] поиск по содержимому: %v", err)
+				log.Printf("[media] чат %d: поиск по содержимому: %v", chatID, err)
 			} else if pm != nil {
-				log.Printf("[media] %s совпал по содержимому с msg %d (hamming %d ≤ %d)", c.MediaType, pm.MsgID, minDist, threshold)
+				log.Printf("[media] чат %d: %s совпал по содержимому с msg %d (hamming %d ≤ %d)", chatID, c.MediaType, pm.MsgID, minDist, threshold)
 				dups = []StoredMessage{*pm}
 			} else {
-				log.Printf("[media] совпадений нет, ближайший хэш на расстоянии %d (порог %d)", minDist, threshold)
+				log.Printf("[media] чат %d: совпадений нет, ближайший хэш на расстоянии %d (порог %d)", chatID, minDist, threshold)
 			}
 		}
 		if len(dups) == 0 && c.MediaType == MediaTypeDocument {
 			if sha, err := d.contentSHA(m); err != nil {
-				log.Printf("[media] sha документа: %v", err)
+				log.Printf("[media] чат %d: sha документа: %v", chatID, err)
 			} else {
 				c.ContentSHA = sha
 				if pm, err := d.st.FindContentDuplicate(chatID, window, sha); err != nil {
-					log.Printf("[media] поиск по содержимому файла: %v", err)
+					log.Printf("[media] чат %d: поиск по содержимому файла: %v", chatID, err)
 				} else if pm != nil {
-					log.Printf("[media] документ совпал по содержимому файла с msg %d", pm.MsgID)
+					log.Printf("[media] чат %d: документ совпал по содержимому файла с msg %d", chatID, pm.MsgID)
 					dups = []StoredMessage{*pm}
 				}
 			}
