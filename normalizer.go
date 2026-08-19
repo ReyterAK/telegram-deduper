@@ -16,8 +16,10 @@ import (
 	"strings"
 )
 
-// urlRe matches http(s) URLs up to the first whitespace/quote.
-var urlRe = regexp.MustCompile(`(?i)https?://[^\s<>"']+`)
+// urlRe matches http(s) URLs up to the first whitespace/quote;
+// an opening "(" directly before the scheme is part of the token
+// ("(https://…)" — the closing paren is trimmed as punctuation).
+var urlRe = regexp.MustCompile(`(?i)\(?https?://[^\s<>"']+`)
 
 // isTrackingParam reports whether a query parameter is tracking
 // noise (utm_* or t.me deep-link params) and must be dropped.
@@ -36,7 +38,8 @@ func isTrackingParam(name string) bool {
 // and tracking params stripped, trailing punctuation removed.
 func NormalizeURL(raw string) string {
 	u := strings.ToLower(raw)
-	u = strings.TrimRight(u, ".,;:!?…")
+	u = strings.TrimLeft(u, "(")
+	u = strings.TrimRight(u, trailingPunct)
 
 	if i := strings.IndexByte(u, '#'); i >= 0 {
 		u = u[:i]
@@ -64,13 +67,18 @@ func NormalizeURL(raw string) string {
 	return u
 }
 
+// trailingPunct is stripped from the end of a normalized text (and
+// from URL tokens): a trailing ")" or "..." is the cheapest way to
+// bypass exact duplicate matching, and carries no meaning.
+const trailingPunct = ".,;:!?…()\"„«»"
+
 // NormalizeText folds case and whitespace, and replaces every URL
 // with its canonical form.
 func NormalizeText(s string) string {
 	s = strings.ToLower(s)
 	s = strings.ReplaceAll(s, "ё", "е")
 	s = urlRe.ReplaceAllStringFunc(s, NormalizeURL)
-	return strings.Join(strings.Fields(s), " ")
+	return strings.TrimRight(strings.Join(strings.Fields(s), " "), trailingPunct)
 }
 
 // HasURL reports whether the (normalized) text contains a URL.

@@ -12,7 +12,16 @@ func TestNormalizeTextBasic(t *testing.T) {
 		{"Много   пробелов\nи табуляций\tтут", "много пробелов и табуляций тут"},
 		{"", ""},
 		{"   ", ""},
-		{"Текст с  разными   пробелами.", "текст с разными пробелами."},
+		// trailing punctuation is stripped (cheap duplicate bypass)
+		{"Текст с  разными   пробелами.", "текст с разными пробелами"},
+		{"Привет!!!", "привет"},
+		{"куда поедешь)", "куда поедешь"},
+		{"ну и что...", "ну и что"},
+		{"Ахаха))", "ахаха"},
+		{"в скобках)", "в скобках"},
+		{"Только знаки...", "только знаки"},
+		{"...", ""},
+		{"?!?!", ""},
 	}
 	for _, c := range cases {
 		if got := NormalizeText(c.in); got != c.want {
@@ -74,6 +83,19 @@ func TestDuplicateSemantics(t *testing.T) {
 	c := NormalizeText("Другое окружение: https://example.com/news")
 	if a == c {
 		t.Errorf("different surrounding text must NOT be a duplicate: %q", a)
+	}
+
+	// The trailing-paren bypass: identical text, one ends with ")".
+	x := NormalizeText("одна и та же фраза")
+	y := NormalizeText("одна и та же фраза)")
+	if x != y {
+		t.Errorf("trailing paren must not break equality: %q vs %q", x, y)
+	}
+	// ...and the same with a URL wrapped in parentheses.
+	u1 := NormalizeText("смотри (https://example.com/news)")
+	u2 := NormalizeText("смотри https://example.com/news")
+	if u1 != u2 {
+		t.Errorf("parens around URL must not break equality: %q vs %q", u1, u2)
 	}
 }
 

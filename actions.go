@@ -86,13 +86,24 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 	reaction := reactionFor(s, typ, cat)
 	link := messageLink(c.ChatID, c.MsgID, d.chatNameFor(c.ChatID))
 
+	// Banned/muted users still get their duplicates deleted with a
+	// notice, but NO warning accounting and no warning line in the
+	// notice — the counter was reset by the ban, so appending one
+	// would falsely show "Предупреждение 1/3" after a ban.
+	banned := false
+	if warningSettingsFor(s, cat).Threshold > 0 {
+		banned = d.userBanned(c.ChatID, c.UserID)
+	}
+
 	switch reaction {
 	case ReactionIgnore:
 		return
 
 	case ReactionComment:
 		text := withAuthor(fmt.Sprintf(commentTemplate(typ), link), c.AuthorName)
-		text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
+		if !banned {
+			text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
+		}
 		msg := tgbotapi.NewMessage(c.ChatID, text)
 		msg.ReplyToMessageID = c.MsgID
 		sent, err := d.bot.Send(msg)
@@ -104,7 +115,9 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 
 	case ReactionDelete:
 		text := withAuthor(deletedShortText(typ), c.AuthorName)
-		text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
+		if !banned {
+			text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
+		}
 
 		// 1) Post the notice as a REPLY to the original first: the
 		// quoted content shows which message was duplicated.
