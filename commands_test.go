@@ -320,3 +320,32 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestParseUnbanArgs(t *testing.T) {
+	cases := []struct {
+		args    string
+		chatID  int64
+		chatTyp string
+		wantU   int64
+		wantC   int64
+		wantErr bool
+	}{
+		{"473032950", -100123, "supergroup", 473032950, -100123, false},
+		{"473032950 -100456", -100123, "supergroup", 473032950, -100456, false},
+		{"473032950 -100456", 0, "private", 473032950, -100456, false},
+		{"473032950", 0, "private", 0, 0, true}, // chat id required in private
+		{"abc", -100123, "supergroup", 0, 0, true},
+		{"", -100123, "supergroup", 0, 0, true},
+		{"1 2 3", -100123, "supergroup", 0, 0, true},
+	}
+	for _, c := range cases {
+		u, ch, err := parseUnbanArgs(c.args, c.chatID, c.chatTyp)
+		if (err != nil) != c.wantErr {
+			t.Errorf("parseUnbanArgs(%q,%d,%q) err=%v, wantErr=%v", c.args, c.chatID, c.chatTyp, err, c.wantErr)
+			continue
+		}
+		if err == nil && (u != c.wantU || ch != c.wantC) {
+			t.Errorf("parseUnbanArgs(%q,%d,%q) = (%d,%d), want (%d,%d)", c.args, c.chatID, c.chatTyp, u, ch, c.wantU, c.wantC)
+		}
+	}
+}

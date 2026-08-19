@@ -107,6 +107,94 @@ func (d *Detector) denyChat(m *tgbotapi.Message) {
 	_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, fmt.Sprintf("Чат %d удалён из разрешённых.", id)))
 }
 
+// fullPermissions restores every send/admin-able permission a member
+// can have — the "unrestricted" state (restrictChatMember with this
+// object lifts a readonly restriction).
+const fullPermissions = `{"can_send_messages":true,"can_send_audios":true,"can_send_documents":true,"can_send_photos":true,"can_send_videos":true,"can_send_video_notes":true,"can_send_voice_notes":true,"can_send_polls":true,"can_send_other_messages":true,"can_add_web_page_previews":true,"can_change_info":true,"can_invite_users":true,"can_pin_messages":true,"can_manage_topics":true}`
+
+// parseUnbanArgs parses "/unban <user_id> [chat_id]". Without a chat
+// id the command's own chat is used; in a private chat the id is
+// required (there is no chat to default to).
+func parseUnbanArgs(args string, cmdChatID int64, cmdChatType string) (int64, int64, error) {
+	fields := strings.Fields(args)
+	if len(fields) < 1 || len(fields) > 2 {
+		return 0, 0, fmt.Errorf("нужны 1-2 аргумента")
+	}
+	userID, err := strconv.ParseInt(fields[0], 10, 64)
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(fields) == 2 {
+		chatID, err := strconv.ParseInt(fields[1], 10, 64)
+		if err != nil {
+			return 0, 0, err
+		}
+		return userID, chatID, nil
+	}
+	if cmdChatType == "private" {
+		return 0, 0, fmt.Errorf("в личном чате нужен id чата")
+	}
+	return userID, cmdChatID, nil
+}
+
+// unbanUser is the owner-only emergency lift of a ban: restores
+// full rights for a restricted member, or unbans a kicked one so
+// they can rejoin. Works through the bot's own admin rights — the
+// owner does not need to be an admin of the target chat.
+func (d *Detector) unbanUser(m *tgbotapi.Message) {
+	if !d.isOwner(m.From.ID) {
+		return
+	}
+	userID, chatID, err := parseUnbanArgs(m.CommandArguments(), m.Chat.ID, m.Chat.Type)
+	if err != nil {
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID, "Использование: /unban <user_id> [chat_id]"))
+		return
+	}
+
+	member, err := d.bot.GetChatMember(tgbotapi.GetChatMemberConfig{
+		ChatConfigWithUser: tgbotapi.ChatConfigWithUser{ChatID: chatID, UserID: userID},
+	})
+	if err != nil {
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+			fmt.Sprintf("Не удалось проверить статус %d в чате %d: %v", userID, chatID, err)))
+		return
+	}
+
+	switch member.Status {
+	case "restricted":
+		if _, err := d.bot.MakeRequest("restrictChatMember", tgbotapi.Params{
+			"chat_id":     strconv.FormatInt(chatID, 10),
+			"user_id":     strconv.FormatInt(userID, 10),
+			"permissions": fullPermissions,
+		}); err != nil {
+			_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+				fmt.Sprintf("Не удалось снять ограничение для %d: %v", userID, err)))
+			return
+		}
+		log.Printf("[owner] чат %d: снято ограничение (readonly) пользователя %d", chatID, userID)
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+			fmt.Sprintf("Ограничение снято: %d может снова писать в чат %d.", userID, chatID)))
+	case "kicked":
+		if _, err := d.bot.MakeRequest("unbanChatMember", tgbotapi.Params{
+			"chat_id": strconv.FormatInt(chatID, 10),
+			"user_id": strconv.FormatInt(userID, 10),
+		}); err != nil {
+			_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+				fmt.Sprintf("Не удалось снять бан для %d: %v", userID, err)))
+			return
+		}
+		log.Printf("[owner] чат %d: снят бан (kick) пользователя %d", chatID, userID)
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+			fmt.Sprintf("Бан снят: %d может вернуться в чат %d по ссылке.", userID, chatID)))
+	case "member", "administrator", "creator":
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+			fmt.Sprintf("Пользователь %d в чате %d не ограничен (%s).", userID, chatID, member.Status)))
+	default:
+		_, _ = d.bot.Send(tgbotapi.NewMessage(m.Chat.ID,
+			fmt.Sprintf("Неизвестный статус %q — бан не менялся.", member.Status)))
+	}
+}
+
 // persistAllowlist saves the config (token and allowlist included).
 func (d *Detector) persistAllowlist() {
 	if err := writeConfig(d.configPath, d.cfg); err != nil {
