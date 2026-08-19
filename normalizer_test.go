@@ -85,6 +85,18 @@ func TestDuplicateSemantics(t *testing.T) {
 		t.Errorf("different surrounding text must NOT be a duplicate: %q", a)
 	}
 
+	// Different URLs of the SAME domain must stay different (the
+	// normalized form keeps the full path — only identical links
+	// after tracking/punctuation cleanup match).
+	d := NormalizeText("Смотри: https://example.com/other")
+	if a == d {
+		t.Errorf("different paths on one domain must NOT be duplicates: %q", a)
+	}
+	e := NormalizeText("Смотри: https://example.com/news?ref=123")
+	if a == e {
+		t.Errorf("different non-tracking query must NOT be stripped: %q", a)
+	}
+
 	// The trailing-paren bypass: identical text, one ends with ")".
 	x := NormalizeText("одна и та же фраза")
 	y := NormalizeText("одна и та же фраза)")
