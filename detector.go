@@ -172,6 +172,9 @@ func (d *Detector) settingsFor(chatID int64) *Settings {
 		if !hasJSONKey([]byte(raw), "doc_mode") {
 			s.DocMode = PhotoModePerceptual
 		}
+		if !hasJSONKey([]byte(raw), "forward_matching") {
+			s.ForwardMatching = ForwardMatchingAll
+		}
 	} else if err == nil {
 		// first contact — persist the defaults
 		d.persistSettings(chatID, s)
@@ -357,6 +360,32 @@ func shouldReact(s *Settings, msgDate, now int64) bool {
 	return now-msgDate <= int64(s.FreshnessMinutes)*60
 }
 
+// forwardMatchKeys returns the search keys for an incoming message
+// under the forward_matching policy. Non-forwards are always matched
+// by everything; forwards are restricted per policy:
+//
+//	all         — text, media and forward source (historical default)
+//	source_only — only the forward source (the same original post)
+//	ignore      — nothing (forwards are never duplicates)
+func forwardMatchKeys(c MsgContent, mode string) (text, mediaUID, fwdSource string) {
+	text, mediaUID, fwdSource = c.NormText, c.MediaUID, c.FwdSource
+	if c.FwdSource == "" || mode == ForwardMatchingAll {
+		return
+	}
+	text, mediaUID = "", ""
+	if mode == ForwardMatchingIgnore {
+		fwdSource = ""
+	}
+	return
+}
+
+// perceptualAllowed reports whether a message may be compared by
+// content (dHash / SHA). Forwards under the source_only/ignore
+// policies are excluded — their media must not match other content.
+func perceptualAllowed(c MsgContent, mode string) bool {
+	return c.FwdSource == "" || mode == ForwardMatchingAll
+}
+
 // MediaMode returns the comparison mode configured for a media
 // type (photo/video/document); unknown types fall back to photo.
 func (s *Settings) MediaMode(mediaType string) string {
@@ -449,10 +478,16 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	// The first occurrence of any content (including the first
 	// forward from an external source) is NOT a duplicate — only
 	// repeats within the window are. Forwards are stored and matched
-	// like regular messages: by text, by media, or by their source.
-	dups, err := d.st.FindDuplicates(chatID, window, c.NormText, c.MediaUID, c.FwdSource, c.MsgID)
-	if err != nil {
-		log.Printf("[detect] поиск дублей: %v", err)
+	// per the forward_matching policy: like regular messages (all),
+	// by source only (source_only), or never (ignore).
+	matchText, matchUID, matchFwd := forwardMatchKeys(c, s.ForwardMatching)
+	var dups []StoredMessage
+	if matchText != "" || matchUID != "" || matchFwd != "" {
+		var err error
+		dups, err = d.st.FindDuplicates(chatID, window, matchText, matchUID, matchFwd, c.MsgID)
+		if err != nil {
+			log.Printf("[detect] поиск дублей: %v", err)
+		}
 	}
 
 	// Perceptual content match: when the exact file match found
@@ -463,8 +498,8 @@ func (d *Detector) Process(m *tgbotapi.Message) {
 	// compare a SHA-256 of the downloaded FILE — file_unique_id is
 	// per-upload for documents, so renamed identical copies need
 	// byte-level matching.
-	if len(dups) == 0 && s.MediaMode(c.MediaType) == PhotoModePerceptual &&
-		c.MediaUID != "" {
+	if len(dups) == 0 && perceptualAllowed(c, s.ForwardMatching) &&
+		s.MediaMode(c.MediaType) == PhotoModePerceptual && c.MediaUID != "" {
 		threshold := mediaThreshold(c.MediaType)
 		if ph, err := d.mediaHash(m, c.MediaType); err != nil {
 			log.Printf("[media] чат %d: хеш %s: %v", chatID, c.MediaType, err)

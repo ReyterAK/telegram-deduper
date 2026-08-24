@@ -138,7 +138,10 @@ func helpText() string {
 		"удалили; пропускать — повтор при удалённом оригинале проходит.\n" +
 		"• Порог свежести — сообщения старше N минут (например, накопившиеся за простой бота) " +
 		"только запоминаются, без удалений и предупреждений; выкл — реагировать на все.\n" +
-		"• Автоудаление — сообщения бота (уведомления) удаляются через N часов.\n\n" +
+		"• Автоудаление — сообщения бота (уведомления) удаляются через N часов.\n" +
+		"• Пересылки: всё — проверяются как обычные сообщения (текст/медиа/источник);\n" +
+		"по источнику — дубль только при повторе ТОГО ЖЕ поста (медиа пересылок из разных\n" +
+		"каналов не сравниваются); игнорировать — пересылки не считаются дублями.\n\n" +
 		"КОМАНДЫ\n" +
 		"/settings — настройки этого чата (только админы)\n" +
 		"/status — состояние бота\n" +
@@ -204,6 +207,17 @@ func deletedOriginalLabel(p string) string {
 	return "реагировать"
 }
 
+func forwardMatchingLabel(mode string) string {
+	switch mode {
+	case ForwardMatchingSourceOnly:
+		return "по источнику"
+	case ForwardMatchingIgnore:
+		return "игнорировать"
+	default:
+		return "всё"
+	}
+}
+
 func freshnessLabel(m int) string {
 	if m <= 0 {
 		return "выкл"
@@ -218,6 +232,7 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		"Картинки: " + photoModeLabel(s.PhotoMode) + "\n" +
 		"Видео: " + photoModeLabel(s.VideoMode) + "\n" +
 		"Документы: " + photoModeLabel(s.DocMode) + "\n" +
+		"Пересылки: " + forwardMatchingLabel(s.ForwardMatching) + "\n" +
 		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
 		"Порог свежести: " + freshnessLabel(s.FreshnessMinutes) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
@@ -253,6 +268,12 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("по ID", "doc:"+PhotoModeExact),
 			btn("по содержимому", "doc:"+PhotoModePerceptual),
 			btn("выкл", "doc:"+PhotoModeOff),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Пересылки: "+forwardMatchingLabel(s.ForwardMatching), "fwd:view"),
+			btn("всё", "fwd:"+ForwardMatchingAll),
+			btn("по источнику", "fwd:"+ForwardMatchingSourceOnly),
+			btn("игнорировать", "fwd:"+ForwardMatchingIgnore),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Удалённый оригинал: "+deletedOriginalLabel(s.DeletedOriginalPolicy), "delpol:view"),
@@ -476,6 +497,14 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 			switch parts[1] {
 			case PhotoModeExact, PhotoModePerceptual, PhotoModeOff:
 				s.DocMode = parts[1]
+				changed = true
+			}
+		}
+	case "fwd":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case ForwardMatchingAll, ForwardMatchingSourceOnly, ForwardMatchingIgnore:
+				s.ForwardMatching = parts[1]
 				changed = true
 			}
 		}

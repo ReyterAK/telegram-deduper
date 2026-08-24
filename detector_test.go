@@ -52,8 +52,8 @@ func TestExtractContentDocumentAsFile(t *testing.T) {
 
 func TestClassify(t *testing.T) {
 	cases := []struct {
-		hasURL, fwd  bool
-		want         DupType
+		hasURL, fwd bool
+		want        DupType
 	}{
 		{false, false, DupTypeMessage},
 		{true, false, DupTypeLink},
@@ -155,12 +155,12 @@ func TestExtractContent(t *testing.T) {
 
 func TestExtractContentForwardSourceLink(t *testing.T) {
 	m := &tgbotapi.Message{
-		MessageID:           50,
-		Chat:                &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
-		From:                &tgbotapi.User{ID: 7},
-		ForwardFromChat:     &tgbotapi.Chat{ID: -100999, UserName: "sourcechan"},
+		MessageID:            50,
+		Chat:                 &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
+		From:                 &tgbotapi.User{ID: 7},
+		ForwardFromChat:      &tgbotapi.Chat{ID: -100999, UserName: "sourcechan"},
 		ForwardFromMessageID: 321,
-		Text:                "пост из канала",
+		Text:                 "пост из канала",
 	}
 	c := extractContent(m, -100123)
 	if !c.ForwardExternal {
@@ -175,10 +175,10 @@ func TestExtractContentForwardSourceLink(t *testing.T) {
 
 	// channel without username → c/ link
 	m2 := &tgbotapi.Message{
-		MessageID:           51,
-		Chat:                &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
-		From:                &tgbotapi.User{ID: 7},
-		ForwardFromChat:     &tgbotapi.Chat{ID: -100999},
+		MessageID:            51,
+		Chat:                 &tgbotapi.Chat{ID: -100123, Type: "supergroup"},
+		From:                 &tgbotapi.User{ID: 7},
+		ForwardFromChat:      &tgbotapi.Chat{ID: -100999},
 		ForwardFromMessageID: 321,
 	}
 	c2 := extractContent(m2, -100123)
@@ -263,5 +263,54 @@ func TestDeletedShortText(t *testing.T) {
 	}
 	if got := deletedShortText(DupTypeMessage); got != "Удален дубль сообщения" {
 		t.Fatalf("message short = %q", got)
+	}
+}
+
+func TestForwardMatchKeys(t *testing.T) {
+	base := MsgContent{NormText: "текст", MediaUID: "uid-1", FwdSource: "fwd:-100:5"}
+
+	// a plain message (not a forward) always keeps all keys,
+	// regardless of the policy
+	c := base
+	c.FwdSource = ""
+	text, uid, fwd := forwardMatchKeys(c, ForwardMatchingSourceOnly)
+	if text != "текст" || uid != "uid-1" || fwd != "" {
+		t.Errorf("non-forward must keep all keys, got %q %q %q", text, uid, fwd)
+	}
+
+	// all: a forward keeps every key (historical behavior)
+	text, uid, fwd = forwardMatchKeys(base, ForwardMatchingAll)
+	if text != "текст" || uid != "uid-1" || fwd != "fwd:-100:5" {
+		t.Errorf("all mode must keep all keys, got %q %q %q", text, uid, fwd)
+	}
+
+	// source_only: only the forward source survives
+	text, uid, fwd = forwardMatchKeys(base, ForwardMatchingSourceOnly)
+	if text != "" || uid != "" || fwd != "fwd:-100:5" {
+		t.Errorf("source_only must keep only the source, got %q %q %q", text, uid, fwd)
+	}
+
+	// ignore: nothing survives
+	text, uid, fwd = forwardMatchKeys(base, ForwardMatchingIgnore)
+	if text != "" || uid != "" || fwd != "" {
+		t.Errorf("ignore must drop all keys, got %q %q %q", text, uid, fwd)
+	}
+}
+
+func TestPerceptualAllowed(t *testing.T) {
+	fwd := MsgContent{FwdSource: "fwd:-100:5"}
+	plain := MsgContent{}
+
+	if !perceptualAllowed(plain, ForwardMatchingSourceOnly) {
+		t.Error("non-forward must allow perceptual matching under source_only")
+	}
+	if perceptualAllowed(fwd, ForwardMatchingSourceOnly) {
+		t.Error("forward must skip perceptual matching under source_only")
+	}
+	if perceptualAllowed(fwd, ForwardMatchingIgnore) {
+		t.Error("forward must skip perceptual matching under ignore")
+	}
+	if !perceptualAllowed(fwd, ForwardMatchingAll) {
+		t.Error("forward must allow perceptual matching under all")
 	}
 }

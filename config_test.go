@@ -29,6 +29,9 @@ func TestDefaultConfig(t *testing.T) {
 		t.Fatalf("content comparison must default to perceptual: %+v",
 			[]string{cfg.PhotoMode, cfg.VideoMode, cfg.DocMode})
 	}
+	if cfg.ForwardMatching != ForwardMatchingAll {
+		t.Fatalf("forward matching must default to all: %q", cfg.ForwardMatching)
+	}
 }
 
 func TestConfigValidationClamps(t *testing.T) {
@@ -59,6 +62,13 @@ func TestConfigValidationClamps(t *testing.T) {
 	}
 	if cfg.VideoMode != PhotoModePerceptual || cfg.DocMode != PhotoModePerceptual {
 		t.Errorf("unknown media modes must be reset to perceptual: %q %q", cfg.VideoMode, cfg.DocMode)
+	}
+	cfg.ForwardMatching = "bogus"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if cfg.ForwardMatching != ForwardMatchingAll {
+		t.Errorf("unknown forward_matching must reset to all, got %q", cfg.ForwardMatching)
 	}
 }
 

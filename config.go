@@ -72,11 +72,11 @@ type Warnings struct {
 }
 
 type Config struct {
-	BotToken        string  `json:"bot_token"`
-	RetentionDays   int     `json:"retention_days"`
+	BotToken        string    `json:"bot_token"`
+	RetentionDays   int       `json:"retention_days"`
 	Reactions       Reactions `json:"reactions"`
 	Warnings        Warnings  `json:"warnings"`
-	AutoDeleteHours int     `json:"auto_delete_hours"` // 0 = off
+	AutoDeleteHours int       `json:"auto_delete_hours"` // 0 = off
 	// PhotoMode: "exact" (file_unique_id), "perceptual" (dHash),
 	// "off" (photos are not compared).
 	PhotoMode string `json:"photo_mode"`
@@ -84,6 +84,9 @@ type Config struct {
 	// and document thumbnails respectively.
 	VideoMode string `json:"video_mode"`
 	DocMode   string `json:"doc_mode"`
+	// ForwardMatching: how forwarded messages are matched
+	// ("all" | "source_only" | "ignore").
+	ForwardMatching string `json:"forward_matching"`
 	// DeletedOriginalPolicy: what happens when a duplicate is found
 	// but the original message is gone from the chat.
 	// "allow"  — the repeat is allowed (becomes the new original).
@@ -115,15 +118,16 @@ const (
 // (chat_settings table). New chats are initialized from the global
 // config values.
 type Settings struct {
-	RetentionDays         int        `json:"retention_days"`
-	Reactions             Reactions  `json:"reactions"`
-	Warnings              Warnings   `json:"warnings"`
-	AutoDeleteHours       int        `json:"auto_delete_hours"`
-	PhotoMode             string     `json:"photo_mode"`
-	VideoMode             string     `json:"video_mode"`
-	DocMode               string     `json:"doc_mode"`
-	DeletedOriginalPolicy string     `json:"deleted_original_policy"`
-	FreshnessMinutes      int        `json:"freshness_minutes"`
+	RetentionDays         int       `json:"retention_days"`
+	Reactions             Reactions `json:"reactions"`
+	Warnings              Warnings  `json:"warnings"`
+	AutoDeleteHours       int       `json:"auto_delete_hours"`
+	PhotoMode             string    `json:"photo_mode"`
+	VideoMode             string    `json:"video_mode"`
+	DocMode               string    `json:"doc_mode"`
+	ForwardMatching       string    `json:"forward_matching"`
+	DeletedOriginalPolicy string    `json:"deleted_original_policy"`
+	FreshnessMinutes      int       `json:"freshness_minutes"`
 }
 
 // asSettings returns the tunable subset of the global config —
@@ -137,6 +141,7 @@ func (c *Config) asSettings() *Settings {
 		PhotoMode:             c.PhotoMode,
 		VideoMode:             c.VideoMode,
 		DocMode:               c.DocMode,
+		ForwardMatching:       c.ForwardMatching,
 		DeletedOriginalPolicy: c.DeletedOriginalPolicy,
 		FreshnessMinutes:      c.FreshnessMinutes,
 	}
@@ -153,6 +158,25 @@ const (
 const (
 	DeletedOriginalAllow  = "allow"
 	DeletedOriginalStrict = "strict"
+)
+
+// Forward-matching policy values: how forwarded messages are matched
+// against the window. Each element of a multi-media forward is a
+// separate message, so without a policy a single coinciding media
+// among several can mark a forward from a DIFFERENT channel as a
+// duplicate.
+const (
+	// ForwardMatchingAll — forwards are matched like any message:
+	// by text, by media and by forward source (historical default).
+	ForwardMatchingAll = "all"
+	// ForwardMatchingSourceOnly — a forward is a duplicate only
+	// when the SAME original post is re-forwarded (same forward
+	// source). Coincidences of individual media/text with other
+	// content are ignored.
+	ForwardMatchingSourceOnly = "source_only"
+	// ForwardMatchingIgnore — forwards are stored but never
+	// considered duplicates.
+	ForwardMatchingIgnore = "ignore"
 )
 
 // DefaultConfig returns the built-in defaults.
@@ -190,6 +214,7 @@ func DefaultConfig() *Config {
 		PhotoMode:       PhotoModePerceptual,
 		VideoMode:       PhotoModePerceptual,
 		DocMode:         PhotoModePerceptual,
+		ForwardMatching: ForwardMatchingAll,
 		// Strict by default: once-flagged content stays flagged.
 		DeletedOriginalPolicy: DeletedOriginalStrict,
 		FreshnessMinutes:      DefaultFreshnessMinutes,
@@ -291,6 +316,12 @@ func (c *Config) validate() error {
 		log.Printf("[config] deleted_original_policy=%q неизвестна, установлено %q", c.DeletedOriginalPolicy, DeletedOriginalStrict)
 		c.DeletedOriginalPolicy = DeletedOriginalStrict
 	}
+	switch c.ForwardMatching {
+	case ForwardMatchingAll, ForwardMatchingSourceOnly, ForwardMatchingIgnore:
+	default:
+		log.Printf("[config] forward_matching=%q неизвестен, установлено %q", c.ForwardMatching, ForwardMatchingAll)
+		c.ForwardMatching = ForwardMatchingAll
+	}
 	if c.FreshnessMinutes < 0 || c.FreshnessMinutes > MaxFreshnessMinutes {
 		log.Printf("[config] freshness_minutes=%d вне 0..%d, установлено %d", c.FreshnessMinutes, MaxFreshnessMinutes, DefaultFreshnessMinutes)
 		c.FreshnessMinutes = DefaultFreshnessMinutes
@@ -336,6 +367,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if !hasJSONKey(data, "doc_mode") {
 		cfg.DocMode = PhotoModePerceptual
+	}
+	if !hasJSONKey(data, "forward_matching") {
+		cfg.ForwardMatching = ForwardMatchingAll
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err
