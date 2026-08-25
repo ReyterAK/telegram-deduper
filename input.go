@@ -12,6 +12,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -166,24 +167,45 @@ func (d *Detector) HandleTextInput(m *tgbotapi.Message) bool {
 	delete(d.pending, m.Chat.ID)
 	chatID := m.Chat.ID
 
+	// Messaging helpers: when the settings menu is ephemeral, the
+	// prompt/confirmation go to the admin only, not into the chat.
+	sendTo := func(text string) {
+		if p.menuEphemeralID != 0 {
+			d.sendEphemeral(chatID, p.userID, text, nil)
+			return
+		}
+		_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, text))
+	}
+
 	if time.Since(p.at) > 5*time.Minute {
-		_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, "Время на ввод истекло — нажмите «✏️» ещё раз."))
+		sendTo("Время на ввод истекло — нажмите «✏️» ещё раз.")
 		return true
 	}
 
 	s := d.settingsFor(chatID)
 	errMsg, ok := applyTextValue(s, p.field, m.Text)
 	if !ok {
-		_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, errMsg))
+		sendTo(errMsg)
 		return true
 	}
 	d.persistSettings(chatID, s)
 
 	f := findNumericField(p.field)
-	_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, fmt.Sprintf("Готово: %s = %s", f.label, f.value(s))))
+	sendTo(fmt.Sprintf("Готово: %s = %s", f.label, f.value(s)))
 
 	// refresh the open menu with the new value
 	text, kb := d.routeMenu(menuPartsForField(p.field), s)
+	if p.menuEphemeralID != 0 {
+		if err := d.editEphemeralMenu(chatID, p.menuUserID, p.menuEphemeralID, text, kb); err != nil {
+			log.Printf("[input] правка эфемерного меню: %v", err)
+		}
+		return true
+	}
+	if p.menuMsgID == 0 {
+		// menu id lost (bot restart since the menu was opened) —
+		// the value is applied and confirmed, nothing to refresh
+		return true
+	}
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageText(chatID, p.menuMsgID, text))
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageReplyMarkup(chatID, p.menuMsgID, kb))
 	return true

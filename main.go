@@ -59,9 +59,12 @@ func main() {
 		log.Printf("[boot] очистка: %v", err)
 	}
 
-	// Expose the command menu in Telegram.
+	// Expose the command menu in Telegram. /settings is an ephemeral
+	// command (Bot API 10.2): the command message is invisible to
+	// other members — the settings UI stays between the admin and
+	// the bot (the menu itself is sent as an ephemeral message).
 	_, _ = bot.MakeRequest("setMyCommands", tgbotapi.Params{
-		"commands": `[{"command":"settings","description":"Настройки бота"},{"command":"status","description":"Состояние бота"},{"command":"help","description":"Справка"}]`,
+		"commands": `[{"command":"settings","description":"Настройки бота","is_ephemeral":true},{"command":"status","description":"Состояние бота"},{"command":"help","description":"Справка"}]`,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

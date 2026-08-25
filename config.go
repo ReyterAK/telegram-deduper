@@ -97,6 +97,15 @@ type Config struct {
 	// remembered but not reacted to (backlog after downtime).
 	// 0 = react to everything.
 	FreshnessMinutes int `json:"freshness_minutes"`
+	// NoticeMode: how duplicate/ban notifications are delivered.
+	// "full"      — public notices with the author's name (historical
+	//               behavior), auto-deleted per auto_delete_hours;
+	// "short"     — public notices WITHOUT the author's name (a
+	//               deterrent without singling anyone out);
+	// "ephemeral" — nothing public: every notice goes only to the
+	//               offending user as an ephemeral message (Bot API
+	//               10.3, visible to that user and the bot only).
+	NoticeMode string `json:"notice_mode"`
 	// AllowedChats: chat ids the bot may serve. Empty = any chat
 	// where the bot is an administrator. When non-empty, other chats
 	// are ignored and the owner is notified.
@@ -128,6 +137,7 @@ type Settings struct {
 	ForwardMatching       string    `json:"forward_matching"`
 	DeletedOriginalPolicy string    `json:"deleted_original_policy"`
 	FreshnessMinutes      int       `json:"freshness_minutes"`
+	NoticeMode            string    `json:"notice_mode"`
 }
 
 // asSettings returns the tunable subset of the global config —
@@ -144,7 +154,29 @@ func (c *Config) asSettings() *Settings {
 		ForwardMatching:       c.ForwardMatching,
 		DeletedOriginalPolicy: c.DeletedOriginalPolicy,
 		FreshnessMinutes:      c.FreshnessMinutes,
+		NoticeMode:            c.NoticeMode,
 	}
+}
+
+// Notice-mode values: how duplicate/ban notifications are delivered.
+const (
+	// NoticeModeFull — public notices with the author's name
+	// (historical behavior).
+	NoticeModeFull = "full"
+	// NoticeModeShort — public notices without the author's name.
+	NoticeModeShort = "short"
+	// NoticeModeEphemeral — nothing public; notices are ephemeral,
+	// visible only to the offending user and the bot.
+	NoticeModeEphemeral = "ephemeral"
+)
+
+// validNoticeMode reports whether m is a known notice mode.
+func validNoticeMode(m string) bool {
+	switch m {
+	case NoticeModeFull, NoticeModeShort, NoticeModeEphemeral:
+		return true
+	}
+	return false
 }
 
 // Photo mode values.
@@ -218,6 +250,7 @@ func DefaultConfig() *Config {
 		// Strict by default: once-flagged content stays flagged.
 		DeletedOriginalPolicy: DeletedOriginalStrict,
 		FreshnessMinutes:      DefaultFreshnessMinutes,
+		NoticeMode:            NoticeModeFull,
 	}
 }
 
@@ -326,6 +359,10 @@ func (c *Config) validate() error {
 		log.Printf("[config] freshness_minutes=%d вне 0..%d, установлено %d", c.FreshnessMinutes, MaxFreshnessMinutes, DefaultFreshnessMinutes)
 		c.FreshnessMinutes = DefaultFreshnessMinutes
 	}
+	if !validNoticeMode(c.NoticeMode) {
+		log.Printf("[config] notice_mode=%q неизвестен, установлено %q", c.NoticeMode, NoticeModeFull)
+		c.NoticeMode = NoticeModeFull
+	}
 	return nil
 }
 
@@ -370,6 +407,9 @@ func LoadConfig(configPath string) (*Config, error) {
 	}
 	if !hasJSONKey(data, "forward_matching") {
 		cfg.ForwardMatching = ForwardMatchingAll
+	}
+	if !hasJSONKey(data, "notice_mode") {
+		cfg.NoticeMode = NoticeModeFull
 	}
 	if err := cfg.validate(); err != nil {
 		return nil, err

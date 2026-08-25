@@ -139,6 +139,12 @@ func helpText() string {
 		"• Порог свежести — сообщения старше N минут (например, накопившиеся за простой бота) " +
 		"только запоминаются, без удалений и предупреждений; выкл — реагировать на все.\n" +
 		"• Автоудаление — сообщения бота (уведомления) удаляются через N часов.\n" +
+		"УВЕДОМЛЕНИЯ (настройка «Уведомления: …» в /settings)\n" +
+		"• Полные — уведомления в чате с именем участника (как раньше).\n" +
+		"• Краткие — уведомления в чате без имени: видно, что дубль удалён, но никого\n" +
+		"  не называют (сдерживающий эффект без «доноса»).\n" +
+		"• Эфемерные — в чат НИЧЕГО не постится: уведомление об удалении, предупреждение\n" +
+		"  и бан видны только самому нарушителю (и боту) и исчезают сами.\n" +
 		"ПЕРЕСЫЛКИ (настройка «Пересылки: …» в /settings)\n" +
 		"Пересылка из другого канала/чата — сообщение, для которого бот видит источник\n" +
 		"(канал + номер поста). Альбом из нескольких медиа — это несколько отдельных\n" +
@@ -193,9 +199,29 @@ func (d *Detector) showSettingsMenu(m *tgbotapi.Message) {
 		return
 	}
 	text, kb := d.mainMenu(d.settingsFor(m.Chat.ID))
+	if m.Chat.IsGroup() || m.Chat.IsSuperGroup() {
+		// The settings menu is admin-only UI: deliver it as an
+		// ephemeral message so the chat stays clean. Fall back to a
+		// public message when the API cannot deliver (offline admin).
+		if id := d.sendEphemeral(m.Chat.ID, m.From.ID, text, &kb); id != 0 {
+			d.ephemeralMenus[m.Chat.ID] = ephemeralMenu{userID: m.From.ID, id: id}
+			return
+		}
+		log.Printf("[cmd] чат %d: эфемерное меню недоставлено — публичное", m.Chat.ID)
+	}
 	msg := tgbotapi.NewMessage(m.Chat.ID, text)
 	msg.ReplyMarkup = kb
 	_, _ = d.bot.Send(msg)
+}
+
+// menuEphemeral returns the tracked ephemeral settings menu of the
+// chat (id, user id of the admin who opened it), or (0, 0).
+func (d *Detector) menuEphemeral(chatID int64) (int64, int64) {
+	em, ok := d.ephemeralMenus[chatID]
+	if !ok {
+		return 0, 0
+	}
+	return em.id, em.userID
 }
 
 // ---------------------------------------------------------------------
@@ -243,6 +269,18 @@ func freshnessLabel(m int) string {
 	return strconv.Itoa(m) + " мин"
 }
 
+func noticeModeLabel(m string) string {
+	switch m {
+	case NoticeModeFull:
+		return "полные"
+	case NoticeModeShort:
+		return "краткие"
+	case NoticeModeEphemeral:
+		return "эфемерные"
+	}
+	return m
+}
+
 func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup) {
 	text := "Настройки Антидубля (этот чат, применяются мгновенно)\n\n" +
 		"Период слежения: " + strconv.Itoa(s.RetentionDays) + " сут — повтор сообщения\n" +
@@ -253,6 +291,7 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 		"Пересылки: " + forwardMatchingLabel(s.ForwardMatching) + "\n" +
 		"Удалённый оригинал: " + deletedOriginalLabel(s.DeletedOriginalPolicy) + "\n" +
 		"Порог свежести: " + freshnessLabel(s.FreshnessMinutes) + "\n" +
+		"Уведомления: " + noticeModeLabel(s.NoticeMode) + "\n" +
 		"Автоудаление сообщений бота: " + autoDeleteLabel(s.AutoDeleteHours)
 	kb := tgbotapi.NewInlineKeyboardMarkup(
 		tgbotapi.NewInlineKeyboardRow(
@@ -311,6 +350,12 @@ func (d *Detector) mainMenu(s *Settings) (string, tgbotapi.InlineKeyboardMarkup)
 			btn("−", "ad:-1"),
 			btn("+", "ad:+1"),
 			btn("✏️", "in:autodel"),
+		),
+		tgbotapi.NewInlineKeyboardRow(
+			btn("Уведомления: "+noticeModeLabel(s.NoticeMode), "notice:view"),
+			btn("Полные", "notice:"+NoticeModeFull),
+			btn("Краткие", "notice:"+NoticeModeShort),
+			btn("Эфемерные", "notice:"+NoticeModeEphemeral),
 		),
 		tgbotapi.NewInlineKeyboardRow(
 			btn("Закрыть", "close"),
@@ -433,7 +478,18 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		// navigation
 	case "noop", "close":
 		if parts[0] == "close" {
-			_, _ = d.bot.Request(tgbotapi.NewEditMessageText(chatID, msgID, "Настройки закрыты"))
+			if msgID == 0 {
+				// callback on an ephemeral menu — delete it for the
+				// admin who opened it
+				if eid, uid := d.menuEphemeral(chatID); eid != 0 {
+					if err := d.deleteEphemeralMenu(chatID, uid, eid); err != nil {
+						log.Printf("[cmd] удаление эфемерного меню: %v", err)
+					}
+					delete(d.ephemeralMenus, chatID)
+				}
+			} else {
+				_, _ = d.bot.Request(tgbotapi.NewEditMessageText(chatID, msgID, "Настройки закрыты"))
+			}
 		}
 		_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
 		return
@@ -464,13 +520,23 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 		// so the whole payload after "in:" is the id, not parts[1].
 		id := strings.TrimPrefix(cq.Data, "in:")
 		if id != "" && findNumericField(id) != nil {
-			d.pending[chatID] = pendingInput{
+			pi := pendingInput{
 				userID:    cq.From.ID,
 				field:     id,
 				menuMsgID: msgID,
 				at:        time.Now(),
 			}
-			_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, inputPrompt(s, id)))
+			if eid, uid := d.menuEphemeral(chatID); eid != 0 {
+				pi.menuEphemeralID = eid
+				pi.menuUserID = uid
+			}
+			d.pending[chatID] = pi
+			prompt := inputPrompt(s, id)
+			if pi.menuEphemeralID != 0 {
+				d.sendEphemeral(chatID, cq.From.ID, prompt, nil)
+			} else {
+				_, _ = d.bot.Send(tgbotapi.NewMessage(chatID, prompt))
+			}
 			_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
 			return
 		}
@@ -526,6 +592,14 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 				changed = true
 			}
 		}
+	case "notice":
+		if len(parts) == 2 {
+			switch parts[1] {
+			case NoticeModeFull, NoticeModeShort, NoticeModeEphemeral:
+				s.NoticeMode = parts[1]
+				changed = true
+			}
+		}
 	case "r":
 		// r:<type>:<cat>:<reaction>
 		if len(parts) == 4 {
@@ -556,6 +630,30 @@ func (d *Detector) applyCallback(cq *tgbotapi.CallbackQuery) {
 
 	// re-render the current menu
 	text, kb := d.routeMenu(parts, s)
+	if msgID == 0 {
+		// callback on an ephemeral menu: edit it for the admin
+		if eid, _ := d.menuEphemeral(chatID); eid != 0 {
+			if err := d.editEphemeralMenu(chatID, cq.From.ID, eid, text, kb); err == nil {
+				_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
+				return
+			} else {
+				log.Printf("[cmd] правка эфемерного меню: %v", err)
+			}
+		}
+		// Menu id unknown (restart) or edit failed: send a fresh
+		// ephemeral menu to the admin.
+		if id := d.sendEphemeral(chatID, cq.From.ID, text, &kb); id != 0 {
+			d.ephemeralMenus[chatID] = ephemeralMenu{userID: cq.From.ID, id: id}
+			_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
+			return
+		}
+		// Ephemeral failed entirely — last resort: public menu.
+		msg := tgbotapi.NewMessage(chatID, text)
+		msg.ReplyMarkup = kb
+		_, _ = d.bot.Send(msg)
+		_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))
+		return
+	}
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageText(chatID, msgID, text))
 	_, _ = d.bot.Request(tgbotapi.NewEditMessageReplyMarkup(chatID, msgID, kb))
 	_, _ = d.bot.Request(tgbotapi.NewCallback(cq.ID, ""))

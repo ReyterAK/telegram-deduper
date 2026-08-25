@@ -32,6 +32,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ForwardMatching != ForwardMatchingAll {
 		t.Fatalf("forward matching must default to all: %q", cfg.ForwardMatching)
 	}
+	if cfg.NoticeMode != NoticeModeFull {
+		t.Fatalf("notice mode must default to full: %q", cfg.NoticeMode)
+	}
 }
 
 func TestConfigValidationClamps(t *testing.T) {
@@ -69,6 +72,13 @@ func TestConfigValidationClamps(t *testing.T) {
 	}
 	if cfg.ForwardMatching != ForwardMatchingAll {
 		t.Errorf("unknown forward_matching must reset to all, got %q", cfg.ForwardMatching)
+	}
+	cfg.NoticeMode = "bogus"
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("validate: %v", err)
+	}
+	if cfg.NoticeMode != NoticeModeFull {
+		t.Errorf("unknown notice_mode must reset to full, got %q", cfg.NoticeMode)
 	}
 }
 

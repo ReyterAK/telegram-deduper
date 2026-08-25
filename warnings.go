@@ -104,16 +104,14 @@ func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now tim
 	if err2 != nil {
 		log.Printf("[warn] чат %d: бан пользователя %d (%s %d сут): %v", chatID, userID, ws.BanType, ws.BanDays, err2)
 		// Unbannable target (chat owner, missing rights, API error):
-		// inform the chat and reset the counter so it does not
-		// accumulate forever against an unbannable user.
+		// inform (per notice_mode) and reset the counter so it does
+		// not accumulate forever against an unbannable user.
 		name := authorName
 		if name == "" {
 			name = strconv.FormatInt(userID, 10)
 		}
-		notice := fmt.Sprintf("Не удалось применить бан для %s: %v", name, err2)
-		if sent, err := d.bot.Send(tgbotapi.NewMessage(chatID, notice)); err == nil {
-			d.scheduleAutoDelete(sent, s.AutoDeleteHours)
-		}
+		notice := banFailNoticeText(name, s.NoticeMode, err2)
+		d.postNotice(chatID, userID, notice, s)
 		if err := d.st.ResetWarnings(chatID, userID); err != nil {
 			log.Printf("[warn] сброс предупреждений после ошибки бана: %v", err)
 		}
@@ -126,16 +124,25 @@ func warnAndMaybeBan(d *Detector, chatID, userID int64, cat DupCategory, now tim
 	log.Printf("[warn] чат %d: пользователь %d: бан %s на %d суток (%d/%d предупреждений)",
 		chatID, userID, ws.BanType, ws.BanDays, count, ws.Threshold)
 
-	// Public ban notice with the offender's name.
+	// Ban notice with the offender's name (or without, per mode).
 	name := authorName
 	if name == "" {
 		name = strconv.FormatInt(userID, 10)
 	}
-	notice := fmt.Sprintf("Участник %s: бан (%s) на %d суток",
-		name, banTypeLabel(ws.BanType), ws.BanDays)
-	sent, err := d.bot.Send(tgbotapi.NewMessage(chatID, notice))
+	notice := banNoticeText(name, s.NoticeMode, ws)
+	d.postNotice(chatID, userID, notice, s)
+}
+
+// postNotice delivers a moderation notice per the chat's notice_mode:
+// publicly (with auto-delete tracking) or ephemeral to the offender.
+func (d *Detector) postNotice(chatID, userID int64, text string, s *Settings) {
+	if s.NoticeMode == NoticeModeEphemeral {
+		d.sendEphemeral(chatID, userID, text, nil)
+		return
+	}
+	sent, err := d.bot.Send(tgbotapi.NewMessage(chatID, text))
 	if err != nil {
-		log.Printf("[warn] уведомление о бане: %v", err)
+		log.Printf("[warn] уведомление: %v", err)
 		return
 	}
 	d.scheduleAutoDelete(sent, s.AutoDeleteHours)
@@ -146,4 +153,33 @@ func banTypeLabel(banType string) string {
 		return "удаление из чата"
 	}
 	return "только чтение"
+}
+
+// banNoticeText builds the public/offender ban notice per
+// notice_mode: "full" names the offender, "short" does not
+// (deterrent without a "донос"), "ephemeral" addresses only the
+// offender (delivered via sendEphemeral).
+func banNoticeText(authorName, mode string, ws WarningSettings) string {
+	switch mode {
+	case NoticeModeFull:
+		return fmt.Sprintf("Участник %s: бан (%s) на %d суток",
+			authorName, banTypeLabel(ws.BanType), ws.BanDays)
+	case NoticeModeEphemeral:
+		return fmt.Sprintf("Бан: %s на %d суток", banTypeLabel(ws.BanType), ws.BanDays)
+	default: // short
+		return fmt.Sprintf("Участник ограничен (%s) на %d суток",
+			banTypeLabel(ws.BanType), ws.BanDays)
+	}
+}
+
+// banFailNoticeText builds the ban-failure notice per notice_mode.
+func banFailNoticeText(authorName, mode string, err error) string {
+	switch mode {
+	case NoticeModeFull:
+		return fmt.Sprintf("Не удалось применить бан для %s: %v", authorName, err)
+	case NoticeModeEphemeral:
+		return fmt.Sprintf("Бан не применён: %v", err)
+	default: // short
+		return fmt.Sprintf("Не удалось применить бан: %v", err)
+	}
 }

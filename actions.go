@@ -80,6 +80,18 @@ func withAuthor(text, name string) string {
 	return text + " — " + name
 }
 
+// noticeText builds the reaction text for the notice_mode:
+// "full" — with the author's name (historical behavior);
+// "short"/"ephemeral" — without it (the offender knows who they
+// are; a short public notice is a deterrent, not a "донос").
+func noticeText(typ DupType, authorName, mode string) string {
+	text := deletedShortText(typ)
+	if mode == NoticeModeFull {
+		text = withAuthor(text, authorName)
+	}
+	return text
+}
+
 // react executes the configured reaction for a detected duplicate.
 // original is the first occurrence (empty for external forwards).
 func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original StoredMessage, now time.Time, s *Settings) {
@@ -100,9 +112,17 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 		return
 
 	case ReactionComment:
-		text := withAuthor(fmt.Sprintf(commentTemplate(typ), link), c.AuthorName)
+		text := fmt.Sprintf(commentTemplate(typ), link)
+		if s.NoticeMode == NoticeModeFull {
+			text = withAuthor(text, c.AuthorName)
+		}
 		if !banned {
 			text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
+		}
+		if s.NoticeMode == NoticeModeEphemeral {
+			// Only the offender sees the comment.
+			d.sendEphemeral(c.ChatID, c.UserID, text, nil)
+			break
 		}
 		msg := tgbotapi.NewMessage(c.ChatID, text)
 		msg.ReplyToMessageID = c.MsgID
@@ -114,9 +134,20 @@ func (d *Detector) react(c MsgContent, typ DupType, cat DupCategory, original St
 		d.scheduleAutoDelete(sent, s.AutoDeleteHours)
 
 	case ReactionDelete:
-		text := withAuthor(deletedShortText(typ), c.AuthorName)
+		text := noticeText(typ, c.AuthorName, s.NoticeMode)
 		if !banned {
 			text = appendWarningLine(d.st, s, text, c.ChatID, c.UserID, cat, now)
+		}
+
+		if s.NoticeMode == NoticeModeEphemeral {
+			// Nothing public: the notice goes to the offender only
+			// (self-expiring, no auto-delete tracking needed).
+			d.sendEphemeral(c.ChatID, c.UserID, text, nil)
+			if _, err := d.bot.Request(tgbotapi.NewDeleteMessage(c.ChatID, c.MsgID)); err != nil {
+				log.Printf("[action] удаление дубля: %v", err)
+				return
+			}
+			break
 		}
 
 		// 1) Post the notice as a REPLY to the original first: the

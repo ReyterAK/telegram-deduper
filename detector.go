@@ -77,10 +77,19 @@ type Detector struct {
 	chatName  map[int64]string
 	chatAdmin map[int64]bool
 	pending   map[int64]pendingInput
-	// foreignNotified remembers chats that were reported to the owner.
-	foreignNotified map[int64]bool
+	// ephemeralMenus tracks the ephemeral /settings menu per chat
+	// (only the admin who opened it can see it; the id is needed for
+	// edit/delete, which the API keys by ephemeral_message_id).
+	ephemeralMenus   map[int64]ephemeralMenu
+	foreignNotified  map[int64]bool
 	// chatTitleCache caches chat titles for the /chats listing.
 	chatTitleCache map[int64]string
+}
+
+// ephemeralMenu remembers the ephemeral settings menu of a chat.
+type ephemeralMenu struct {
+	userID int64
+	id     int64
 }
 
 // pendingInput remembers a text-value request until the user replies.
@@ -89,6 +98,11 @@ type pendingInput struct {
 	field     string
 	menuMsgID int
 	at        time.Time
+	// menuEphemeralID/menuUserID identify the EPHEMERAL settings menu
+	// to refresh after the value is applied (0 = public menu, edited
+	// via menuMsgID).
+	menuEphemeralID int64
+	menuUserID      int64
 }
 
 func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string) *Detector {
@@ -101,6 +115,7 @@ func NewDetector(cfg *Config, st *Store, bot *tgbotapi.BotAPI, configPath string
 		chatName:        map[int64]string{},
 		chatAdmin:       map[int64]bool{},
 		pending:         map[int64]pendingInput{},
+		ephemeralMenus:  map[int64]ephemeralMenu{},
 		foreignNotified: map[int64]bool{},
 		chatTitleCache:  map[int64]string{},
 	}
@@ -159,21 +174,8 @@ func (d *Detector) settingsFor(chatID int64) *Settings {
 	}
 	s := d.cfg.asSettings()
 	if raw, err := d.st.GetChatSettings(chatID); err == nil && raw != "" {
-		if err := json.Unmarshal([]byte(raw), s); err != nil {
+		if err := unmarshalSettings([]byte(raw), s); err != nil {
 			log.Printf("[chat] чтение настроек чата %d: %v", chatID, err)
-		}
-		// migration: settings added after this chat was stored
-		if !hasJSONKey([]byte(raw), "freshness_minutes") {
-			s.FreshnessMinutes = DefaultFreshnessMinutes
-		}
-		if !hasJSONKey([]byte(raw), "video_mode") {
-			s.VideoMode = PhotoModePerceptual
-		}
-		if !hasJSONKey([]byte(raw), "doc_mode") {
-			s.DocMode = PhotoModePerceptual
-		}
-		if !hasJSONKey([]byte(raw), "forward_matching") {
-			s.ForwardMatching = ForwardMatchingAll
 		}
 	} else if err == nil {
 		// first contact — persist the defaults
@@ -181,6 +183,37 @@ func (d *Detector) settingsFor(chatID int64) *Settings {
 	}
 	d.settings[chatID] = s
 	return s
+}
+
+// unmarshalSettings loads stored per-chat settings JSON into s,
+// applying migrations for keys added after the blob was written.
+func unmarshalSettings(raw []byte, s *Settings) error {
+	if err := json.Unmarshal(raw, s); err != nil {
+		return err
+	}
+	migrateSettings(raw, s)
+	return nil
+}
+
+// migrateSettings fills in defaults for settings added after the
+// stored per-chat JSON was written (the global config has its own
+// migration in LoadConfig).
+func migrateSettings(raw []byte, s *Settings) {
+	if !hasJSONKey(raw, "freshness_minutes") {
+		s.FreshnessMinutes = DefaultFreshnessMinutes
+	}
+	if !hasJSONKey(raw, "video_mode") {
+		s.VideoMode = PhotoModePerceptual
+	}
+	if !hasJSONKey(raw, "doc_mode") {
+		s.DocMode = PhotoModePerceptual
+	}
+	if !hasJSONKey(raw, "forward_matching") {
+		s.ForwardMatching = ForwardMatchingAll
+	}
+	if !hasJSONKey(raw, "notice_mode") {
+		s.NoticeMode = NoticeModeFull
+	}
 }
 
 func (d *Detector) persistSettings(chatID int64, s *Settings) {
