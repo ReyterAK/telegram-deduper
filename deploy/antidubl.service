@@ -1,6 +1,6 @@
 [Unit]
 Description=Antidubl — Telegram anti-duplicate bot
-Documentation=https://github.com/ReyterAK/antidoubl
+Documentation=https://github.com/ReyterAK/telegram-deduper
 After=network-online.target
 Wants=network-online.target
 

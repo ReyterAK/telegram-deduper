@@ -1,4 +1,4 @@
-# Antidubl
+# telegram-deduper
 
 A Telegram bot that keeps group chats clean of duplicates, floods and spam.
 It detects repeated content in real time — text, links, photos, videos,
@@ -9,7 +9,9 @@ One static binary, one SQLite file, no web interface. Settings live in the
 chat itself: `/settings` opens an inline menu for chat administrators.
 
 > The bot's own chat-facing text (menus, notifications, `/help`) is in Russian,
-> matching the bot's name «Антидубль». This README is in English.
+> matching the bot's name «Антидубль» (`/settings` in the chat). This README is
+> in English. The binary is still built as `antidubl` — the name inside the
+> repository and on disk predates the rename to `telegram-deduper`.
 
 ## What counts as a duplicate
 
@@ -99,8 +101,8 @@ messages are unavailable, there is a fallback to a regular public menu.
 Requires Go 1.25+ (no CGO — SQLite via `modernc.org/sqlite`).
 
 ```sh
-git clone https://github.com/ReyterAK/antidoubl
-cd antidoubl
+git clone https://github.com/ReyterAK/telegram-deduper
+cd telegram-deduper
 go build -o antidubl .
 cp config.example.json config.json
 $EDITOR config.json          # set bot_token
