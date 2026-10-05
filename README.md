@@ -29,8 +29,9 @@ Media is classified by MIME type: a video sent with "Send as file" arrives as
 `m.Document` with `video/*`, and its hash is taken from the thumbnail instead
 of being skipped.
 
-Documents and videos larger than 20 MB are not downloaded — that is the Bot API
+Documents larger than 20 MB are not downloaded for SHA-256 — that is the Bot API
 `getFile` ceiling; they fall back to `file_unique_id` and thumbnail checks.
+Videos are never downloaded at all: only their thumbnail is fetched.
 
 ## Reactions
 
