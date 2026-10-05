@@ -1,3 +1,13 @@
-antidubl
+# build artifacts
+/antidubl
+/antidubl.new
 *.db
-config.json
+*.db-shm
+*.db-wal
+
+# local configuration (contains the bot token)
+/config.json
+
+# runtime state
+/heartbeat
+/heartbeat.tmp

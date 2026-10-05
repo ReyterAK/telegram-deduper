@@ -1,0 +1,49 @@
+name: build
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test ./...
+
+  build:
+    needs: test
+    strategy:
+      matrix:
+        include:
+          - os: linux
+            goarch: amd64
+          - os: linux
+            goarch: arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          check-latest: true
+      - name: build
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.goarch }}
+        run: go build -trimpath -ldflags '-s -w' -o antidubl .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: antidubl-${{ matrix.os }}-${{ matrix.goarch }}
+          path: antidubl

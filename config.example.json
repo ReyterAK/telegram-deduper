@@ -1,0 +1,38 @@
+{
+  "bot_token": "1234567890:REPLACE_WITH_YOUR_BOT_TOKEN",
+  "retention_days": 10,
+  "reactions": {
+    "link": {
+      "same_participant": "delete",
+      "diff_participant": "delete"
+    },
+    "message": {
+      "same_participant": "delete",
+      "diff_participant": "ignore"
+    }
+  },
+  "warnings": {
+    "same_participant": {
+      "threshold": 0,
+      "lifetime_days": 10,
+      "ban_type": "readonly",
+      "ban_days": 1
+    },
+    "diff_participant": {
+      "threshold": 0,
+      "lifetime_days": 10,
+      "ban_type": "readonly",
+      "ban_days": 1
+    }
+  },
+  "auto_delete_hours": 0,
+  "photo_mode": "perceptual",
+  "video_mode": "perceptual",
+  "doc_mode": "perceptual",
+  "forward_matching": "all",
+  "deleted_original_policy": "strict",
+  "freshness_minutes": 5,
+  "notice_mode": "full",
+  "allowed_chats": [],
+  "owner_user_id": 0
+}

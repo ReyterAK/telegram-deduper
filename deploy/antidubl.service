@@ -1,0 +1,24 @@
+[Unit]
+Description=Antidubl — Telegram anti-duplicate bot
+Documentation=https://github.com/ReyterAK/antidoubl
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=antidubl
+Group=antidubl
+WorkingDirectory=/opt/antidubl
+Environment=ANTIDUBL_CONFIG=/opt/antidubl/config.json
+Environment=ANTIDUBL_DB=/opt/antidubl/antidubl.db
+ExecStart=/opt/antidubl/antidubl
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/antidubl
+
+[Install]
+WantedBy=multi-user.target
