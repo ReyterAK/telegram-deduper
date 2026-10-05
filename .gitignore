@@ -1,6 +1,7 @@
 # build artifacts
 /antidubl
 /antidubl.new
+/dist/
 *.db
 *.db-shm
 *.db-wal

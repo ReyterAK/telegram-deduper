@@ -24,26 +24,27 @@ jobs:
 
   build:
     needs: test
-    strategy:
-      matrix:
-        include:
-          - os: linux
-            goarch: amd64
-          - os: linux
-            goarch: arm64
-    runs-on: ${{ matrix.os }}
+    # One runner for both targets: they differ only by GOARCH
+    # (cross-compilation), so a matrix over os would only
+    # duplicate the same ubuntu-latest runner.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25'
           check-latest: true
-      - name: build
+      - name: build amd64
         env:
-          GOOS: ${{ matrix.os }}
-          GOARCH: ${{ matrix.goarch }}
-        run: go build -trimpath -ldflags '-s -w' -o antidubl .
+          GOOS: linux
+          GOARCH: amd64
+        run: go build -trimpath -ldflags '-s -w' -o dist/antidubl-amd64 .
+      - name: build arm64
+        env:
+          GOOS: linux
+          GOARCH: arm64
+        run: go build -trimpath -ldflags '-s -w' -o dist/antidubl-arm64 .
       - uses: actions/upload-artifact@v4
         with:
-          name: antidubl-${{ matrix.os }}-${{ matrix.goarch }}
-          path: antidubl
+          name: antidubl-linux-binaries
+          path: dist/
